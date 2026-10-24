@@ -1,0 +1,35 @@
+# AGENTS.md
+
+drawkit views, inspects and lints DWG/DXF drawings. Read `README.md` for the shape. Using
+drawkit on drawings (not developing it) is covered by `skills/drawkit/SKILL.md`.
+
+## Commands
+
+- `npm run build:sidecar` after any change to `sidecar/Program.cs`. The payload cache is keyed
+  by file path, size and mtime, not by sidecar version: clear `~/.cache/drawkit` after a
+  payload change.
+- `npm run build:viewer` after any change under `viewer/`.
+- `npm run typecheck` and `npm test` before calling work done. Tests need the sidecar built
+  and `npm run fixtures` run once.
+- `node scripts/shot.mjs <viewer-url> out.png [w h] [--eval js]` screenshots the viewer
+  headless once the drawing has loaded (needs `chromium`). Use it to check viewer changes.
+
+## Rules for rule writers
+
+- A rule earns its place by catching a real defect. Every new rule gets a planted defect in
+  `fixtures/make_fixtures.py` (bad drawing) and must stay silent on the clean drawing.
+- Before believing a rule on a real drawing, check a sample of its findings against a second
+  source (the hydraulic model, the issued PDF, the raw entities via `drawkit query`). The
+  first versions of the sewer matcher produced hundreds of false findings that looked
+  plausible; every one came from pairing labels to the wrong symbol.
+- Findings carry handles of real entities and a world bbox. Messages state the numbers that
+  disagree, not just that something is wrong.
+- Engineering limits (minimum depth, minimum slope) come from `drawkit.json`, never from
+  defaults in code.
+
+## Code
+
+- Node runs `src/` TypeScript directly: erasable syntax only (no enums, no parameter
+  properties, no namespaces), `.ts` extensions on relative imports.
+- `viewer/` stays framework-free so it can move into another host.
+- Payload schema changes bump `schema` in `sidecar/Program.cs` and `src/types.ts` together.

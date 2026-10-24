@@ -1,0 +1,8 @@
+node_modules/
+bin/sidecar/
+sidecar/bin/
+sidecar/obj/
+viewer/dist/
+fixtures/*.dxf
+fixtures/*.dwg
+.cache/

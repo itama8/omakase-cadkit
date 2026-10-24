@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>drawkit</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header id="top">
+      <div class="brand">drawkit</div>
+      <form id="open-form">
+        <input id="path" type="text" spellcheck="false" placeholder="/path/to/drawing.dwg or .dxf" autocomplete="off" />
+        <button type="submit">Open</button>
+      </form>
+      <div id="meta" class="meta"></div>
+    </header>
+
+    <aside id="left">
+      <nav class="tabs" data-for="left">
+        <button data-tab="layers" class="on">Layers</button>
+        <button data-tab="search">Find text</button>
+        <button data-tab="files">Files</button>
+      </nav>
+      <section data-pane="layers" class="pane on">
+        <div class="row tools">
+          <input id="layer-filter" type="text" placeholder="Filter layers" />
+          <button id="layers-all" title="Show all layers">All</button>
+          <button id="layers-none" title="Hide all layers">None</button>
+        </div>
+        <ul id="layers" class="list"></ul>
+      </section>
+      <section data-pane="search" class="pane">
+        <div class="row tools"><input id="search" type="text" placeholder="Text contains… (regex ok)" /></div>
+        <div id="search-count" class="hint"></div>
+        <ul id="search-results" class="list"></ul>
+      </section>
+      <section data-pane="files" class="pane">
+        <div class="hint">Recent</div>
+        <ul id="recent" class="list"></ul>
+        <div class="hint" id="dir-label">Browse</div>
+        <ul id="dir" class="list"></ul>
+      </section>
+    </aside>
+
+    <main id="stage">
+      <canvas id="canvas"></canvas>
+      <div id="overlay" class="overlay hidden"></div>
+      <div id="empty" class="empty">
+        <h1>Open a DWG or DXF</h1>
+        <p>Paste a path above, pick one under <b>Files</b>, or run <code>drawkit view &lt;file&gt;</code>.</p>
+        <p class="keys"><kbd>F</kbd> fit · <kbd>wheel</kbd> zoom · <kbd>drag</kbd> pan · <kbd>click</kbd> inspect · <kbd>J</kbd>/<kbd>K</kbd> next/previous finding · <kbd>Esc</kbd> clear</p>
+      </div>
+    </main>
+
+    <aside id="right">
+      <nav class="tabs" data-for="right">
+        <button data-tab="findings" class="on">Findings <span id="finding-badge" class="badge"></span></button>
+        <button data-tab="inspect">Inspect</button>
+        <button data-tab="sheet">Sheet</button>
+      </nav>
+      <section data-pane="findings" class="pane on">
+        <div class="row tools">
+          <span id="packs"></span>
+          <button id="relint" title="Run lint again">Re-run</button>
+        </div>
+        <div class="row sevs">
+          <label><input type="checkbox" data-sev="error" checked /> <span class="dot error"></span><span id="n-error">0</span></label>
+          <label><input type="checkbox" data-sev="warning" checked /> <span class="dot warning"></span><span id="n-warning">0</span></label>
+          <label><input type="checkbox" data-sev="info" /> <span class="dot info"></span><span id="n-info">0</span></label>
+        </div>
+        <div id="profile" class="hint"></div>
+        <ol id="findings" class="list findings"></ol>
+      </section>
+      <section data-pane="inspect" class="pane">
+        <div id="inspect" class="inspect"><p class="hint">Click an entity on the drawing.</p></div>
+      </section>
+      <section data-pane="sheet" class="pane">
+        <div id="sheet" class="inspect"></div>
+      </section>
+    </aside>
+
+    <footer id="status">
+      <span id="coords">—</span>
+      <span id="zoom"></span>
+      <span id="perf"></span>
+    </footer>
+    <script type="module" src="/viewer.js"></script>
+  </body>
+</html>

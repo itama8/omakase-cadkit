@@ -1,0 +1,114 @@
+// Supervises the ACadSharp sidecar: started on first use, one JSON line per request,
+// a deadline per request, and a fresh process after a crash or timeout.
+
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+export function sidecarCommand(): { cmd: string; args: string[]; env: NodeJS.ProcessEnv } {
+  const dir = process.env.DRAWKIT_SIDECAR_DIR ?? path.join(ROOT, "bin", "sidecar");
+  const exe = path.join(dir, "drawkit-sidecar");
+  const dll = path.join(dir, "drawkit-sidecar.dll");
+  const env: NodeJS.ProcessEnv = { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: "1", DOTNET_NOLOGO: "1" };
+  const dotnetRoot = process.env.DOTNET_ROOT ?? path.join(homedir(), ".dotnet");
+  if (existsSync(dotnetRoot)) env.DOTNET_ROOT = dotnetRoot;
+  if (existsSync(exe)) return { cmd: exe, args: [], env };
+  if (existsSync(dll)) return { cmd: path.join(dotnetRoot, "dotnet"), args: [dll], env };
+  throw new Error(`drawkit sidecar is not built: run \`npm run build:sidecar\` (looked in ${dir})`);
+}
+
+interface Pending {
+  resolve: (v: any) => void;
+  reject: (e: Error) => void;
+  timer: NodeJS.Timeout;
+}
+
+export class Sidecar {
+  private proc: ChildProcessWithoutNullStreams | null = null;
+  private nextId = 1;
+  private pending = new Map<number, Pending>();
+  private buf = "";
+  private stderrTail = "";
+
+  private start(): ChildProcessWithoutNullStreams {
+    if (this.proc) return this.proc;
+    const { cmd, args, env } = sidecarCommand();
+    const proc = spawn(cmd, [...args, "serve"], { env, stdio: ["pipe", "pipe", "pipe"] });
+    proc.stdout.setEncoding("utf8");
+    proc.stdout.on("data", (chunk: string) => this.onData(chunk));
+    proc.stderr.setEncoding("utf8");
+    proc.stderr.on("data", (chunk: string) => {
+      this.stderrTail = (this.stderrTail + chunk).slice(-2000);
+    });
+    proc.on("exit", (code, signal) => {
+      this.proc = null;
+      const err = new Error(`sidecar exited (${signal ?? code})${this.stderrTail ? ": " + this.stderrTail.trim() : ""}`);
+      for (const p of this.pending.values()) {
+        clearTimeout(p.timer);
+        p.reject(err);
+      }
+      this.pending.clear();
+    });
+    proc.on("error", (err) => {
+      for (const p of this.pending.values()) {
+        clearTimeout(p.timer);
+        p.reject(err);
+      }
+      this.pending.clear();
+      this.proc = null;
+    });
+    // Keep the parent free to exit when only the sidecar is left.
+    proc.unref();
+    (proc.stdin as any).unref?.();
+    (proc.stdout as any).unref?.();
+    (proc.stderr as any).unref?.();
+    this.proc = proc;
+    return proc;
+  }
+
+  private onData(chunk: string) {
+    this.buf += chunk;
+    let nl: number;
+    while ((nl = this.buf.indexOf("\n")) >= 0) {
+      const line = this.buf.slice(0, nl).trim();
+      this.buf = this.buf.slice(nl + 1);
+      if (!line) continue;
+      let msg: any;
+      try {
+        msg = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const p = this.pending.get(msg.id);
+      if (!p) continue;
+      this.pending.delete(msg.id);
+      clearTimeout(p.timer);
+      if (msg.ok) p.resolve(msg.result);
+      else p.reject(new Error(msg.error));
+    }
+  }
+
+  request<T = any>(method: string, params: Record<string, unknown> = {}, timeoutMs = 120_000): Promise<T> {
+    const proc = this.start();
+    const id = this.nextId++;
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`sidecar ${method} timed out after ${timeoutMs} ms`));
+        // A stuck parse holds the only worker; replace the process.
+        this.stop();
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+      proc.stdin.write(JSON.stringify({ id, method, params }) + "\n");
+    });
+  }
+
+  stop() {
+    this.proc?.kill();
+    this.proc = null;
+  }
+}

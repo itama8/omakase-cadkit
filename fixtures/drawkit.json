@@ -1,0 +1,32 @@
+{
+  "paper": "A1",
+  "minTextMm": 1.8,
+  "packs": ["common", "sewer"],
+  "sewer": {
+    "manhole": {
+      "layer": "NODE",
+      "blocks": ["MH"],
+      "label": "^MH-\\s*(\\d+)$",
+      "gl": "^GL:\\s*(-?[\\d.]+)\\s*m?$",
+      "il": "^IL:\\s*(-?[\\d.]+)\\s*m?$",
+      "depth": "^D:\\s*([\\d.]+)\\s*m$",
+      "labelRadius": 12,
+      "fieldRadius": 7,
+      "fieldLayout": "below"
+    },
+    "pipe": {
+      "layer": "PIPE",
+      "label": "^P-\\s*(\\d+)$",
+      "length": "^L-\\s*([\\d.]+)\\s*m$",
+      "diameter": "^D:\\s*([\\d.]+)\\s*mm$",
+      "labelRadius": 8,
+      "fieldRadius": 5,
+      "fieldLayout": "above",
+      "flowArrowBlock": "FLOWARROW"
+    },
+    "outfall": { "blocks": ["OUTFALL"] },
+    "snapTolerance": 0.5,
+    "minDepth": 0.9,
+    "lengthTolerance": 0.05
+  }
+}

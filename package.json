@@ -1,0 +1,26 @@
+{
+  "name": "drawkit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "View, inspect and lint DWG/DXF drawings. Reference build for the Omakase CAD workstream.",
+  "type": "module",
+  "bin": {
+    "drawkit": "bin/drawkit.mjs"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "build:sidecar": "DOTNET_CLI_TELEMETRY_OPTOUT=1 dotnet build sidecar -c Release -o bin/sidecar",
+    "build:viewer": "esbuild viewer/main.ts --bundle --format=esm --target=es2022 --sourcemap --outfile=viewer/dist/viewer.js",
+    "build": "npm run build:sidecar && npm run build:viewer",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts",
+    "fixtures": "uv run --quiet --with ezdxf --python 3.13 python -I fixtures/make_fixtures.py fixtures"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}
