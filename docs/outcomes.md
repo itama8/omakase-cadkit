@@ -15,7 +15,7 @@ handoffs live in [devlogs](../.devlog/README.md). Updated 2026-10-25.
 
 | ID | Desired outcome | State | Evidence needed to call it done | Next action |
 |---|---|---|---|---|
-| O4 | A user installs a versioned package that works outside the source checkout. | queued | Installed tarball contains compiled JS, types, viewer assets, notices, and a working sidecar strategy; CLI and library smoke tests pass on declared supported platforms. | Rehearse `npm pack` + install in a temporary project, then choose compiled output and sidecar distribution. |
+| O4 | A user installs a versioned package that works outside the source checkout. | active | Installed tarball contains compiled JS, types, viewer assets, notices, and a working sidecar strategy; CLI and library smoke tests pass on declared supported platforms. | Compiled CLI and library install and run from a tarball; choose how the sidecar ships, then repeat the rehearsal with a drawing open. [Evidence](../.devlog/2026-10-25-s05.md). |
 
 ## After those
 
@@ -42,4 +42,4 @@ Borrowed from Omakase: read current state before deeper history, separate accept
 from implementation, choose a runnable next action, and keep evidence in devlogs.
 This repository has no dependency on Omakase's skills, plans, or tooling.
 
-Latest evidence: [2026-10-25-s04](../.devlog/2026-10-25-s04.md).
+Latest evidence: [2026-10-25-s05](../.devlog/2026-10-25-s05.md).

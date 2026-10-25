@@ -8,20 +8,21 @@
     "omakase-cadkit": "bin/omakase-cadkit.mjs",
     "drawkit": "bin/drawkit.mjs"
   },
-  "types": "./src/index.ts",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     }
   },
   "engines": {
     "node": ">=23.6"
   },
   "scripts": {
+    "build:lib": "tsc -p tsconfig.build.json",
     "build:sidecar": "node scripts/build-sidecar.mjs",
     "build:viewer": "esbuild viewer/main.ts --bundle --format=esm --target=es2022 --sourcemap --outfile=viewer/dist/viewer.js",
-    "build": "npm run build:sidecar && npm run build:viewer",
+    "build": "npm run build:lib && npm run build:sidecar && npm run build:viewer",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.ts",
     "fixtures": "uv run --quiet --with ezdxf --python 3.13 python -I fixtures/make_fixtures.py fixtures",
@@ -42,5 +43,28 @@
   "bugs": {
     "url": "https://github.com/itama8/omakase-cadkit/issues"
   },
-  "homepage": "https://github.com/itama8/omakase-cadkit#readme"
+  "homepage": "https://github.com/itama8/omakase-cadkit#readme",
+  "files": [
+    "dist/",
+    "bin/omakase-cadkit.mjs",
+    "bin/drawkit.mjs",
+    "sidecar/Program.cs",
+    "sidecar/OmakaseCadkitSidecar.csproj",
+    "viewer/index.html",
+    "viewer/style.css",
+    "viewer/dist/",
+    "fixtures/make_fixtures.py",
+    "fixtures/omakase-cadkit.json",
+    "scripts/build-sidecar.mjs",
+    "scripts/setup.mjs",
+    "scripts/shot.mjs",
+    "scripts/smoke.mjs",
+    "scripts/viewer-check.js",
+    "skills/",
+    "docs/",
+    "licenses/",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "README.md"
+  ]
 }

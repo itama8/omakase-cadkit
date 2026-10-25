@@ -1,6 +1,13 @@
 #!/usr/bin/env node
-// Node runs the TypeScript sources directly (type stripping, Node >= 23.6).
-import { main } from "../src/cli.ts";
+// Runs the compiled CLI from dist/, which `npm run build` (and `npm run setup`) creates.
+import { existsSync } from "node:fs";
+
+const cli = new URL("../dist/cli.js", import.meta.url);
+if (!existsSync(cli)) {
+  process.stderr.write("omakase-cadkit: not built (dist/cli.js missing). Run `npm run build` in the package.\n");
+  process.exit(2);
+}
+const { main } = await import(cli.href);
 
 main(process.argv.slice(2)).then(
   // Set the exit code instead of calling process.exit(), which drops piped stdout that has

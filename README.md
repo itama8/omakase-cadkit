@@ -112,9 +112,8 @@ Deep imports under `src/` are internal and can change.
 
 [`examples/library-consumer/`](examples/library-consumer/consumer.ts) is a separate package
 that depends on this one and exercises every step above; `npm run consumer` installs it,
-typechecks it, and runs it. It imports TypeScript sources through the package entry, so it
-needs Node 23.6 or newer type stripping. A compiled distribution is tracked in
-[outcomes](docs/outcomes.md) as O4.
+typechecks it, and runs it. `npm run build` emits `dist/` JavaScript and `.d.ts` files, which
+are what `exports` and `types` point at, so consumers do not need to run TypeScript.
 
 ## Project profile
 
@@ -163,6 +162,7 @@ src/index.ts            public library entry: Cadkit, DrawingHandle
 src/cli.ts, server.ts   CLI and loopback viewer server
 viewer/                 canvas renderer and UI, no framework
 examples/library-consumer/  separate package that uses only the public library API
+dist/                   compiled CLI and library (npm run build:lib), what npm publishes
 fixtures/               generator for synthetic drawings with planted defects
 test/                   end-to-end tests (+ a local real-drawing regression)
 skills/omakase-cadkit/         agent skill for using omakase-cadkit on drawings

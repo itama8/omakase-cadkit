@@ -279,7 +279,9 @@ async function serverUp(port: number): Promise<boolean> {
 async function cmdView(file: string, flags: Flags) {
   const port = Number(str(flags, "port") ?? process.env.OMAKASE_CADKIT_PORT ?? process.env.DRAWKIT_PORT ?? 4280);
   if (!(await serverUp(port))) {
-    const child = spawn(process.execPath, [path.join(import.meta.dirname, "server.ts"), "--port", String(port)], { detached: true, stdio: "ignore" });
+    const server = ["server.js", "server.ts"].map((f) => path.join(import.meta.dirname, f)).find((f) => existsSync(f));
+    if (!server) throw new Error("viewer server entry not found: run `npm run build`");
+    const child = spawn(process.execPath, [server, "--port", String(port)], { detached: true, stdio: "ignore" });
     child.unref();
     for (let i = 0; i < 50 && !(await serverUp(port)); i++) await new Promise((r) => setTimeout(r, 100));
   }

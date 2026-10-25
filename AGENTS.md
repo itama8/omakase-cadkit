@@ -21,6 +21,8 @@ omakase-cadkit on drawings (not developing it) is covered by `skills/omakase-cad
   by file path, size and mtime, not by sidecar version: clear `~/.cache/omakase-cadkit` after a
   payload change.
 - `npm run build:viewer` after any change under `viewer/`.
+- `npm run build:lib` after any change under `src/`: `bin/` and the package entry run
+  `dist/`, not the sources. `npm run setup` and `npm run build` include it.
 - `npm run typecheck` and `npm test` before calling work done. Tests need the sidecar built
   and `npm run fixtures` run once.
 - `node scripts/shot.mjs <viewer-url> out.png [w h] [--eval js]` screenshots the viewer

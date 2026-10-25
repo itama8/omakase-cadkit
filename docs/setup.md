@@ -6,7 +6,8 @@ An installable npm library is a [later outcome](outcomes.md); do not use
 
 ## Prerequisites
 
-- Node.js 23.6 or newer and npm. The development sources run with native type stripping.
+- Node.js 23.6 or newer and npm. Tests and tooling run the TypeScript sources with native
+  type stripping; the CLI and library run compiled `dist/` output from `npm run build`.
 - The .NET 8 SDK, including the .NET 8 runtime. A runtime-only installation cannot build
   the sidecar. The build checks `DOTNET_ROOT`, `~/.dotnet`, then `PATH` for an SDK.
 - `uv` for synthetic DXF fixtures. It supplies Python 3.13 and ezdxf for the generator.

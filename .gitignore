@@ -6,3 +6,4 @@ viewer/dist/
 fixtures/*.dxf
 fixtures/*.dwg
 .cache/
+dist/
