@@ -20,20 +20,24 @@ DWG/DXF ──> sidecar (C#, ACadSharp)  ──payload JSON──>  cache (~/.ca
                     CLI (agents)              HTTP viewer (people)
 ```
 
-## Setup
+## Run it
 
-For automatic setup, download and extract the repository, then use **`setup.cmd` on
-Windows** or **`bash setup.command` on macOS/Linux**. It checks dependencies,
-installs missing tools locally, and builds and verifies the app. Afterward, use
-`launch.cmd` or `launch.command` to open the empty viewer. CI runs Setup and opens
-a synthetic drawing through Launch on Linux x64, macOS on Apple Silicon and Intel,
-and Windows x64. Windows ARM64 and Linux ARM64 pass the platform checks but no run
-covers them. See [setup](docs/setup.md) and, for what an alpha does not do yet,
-[trying an alpha](docs/setup.md#trying-an-alpha).
+**Tester:** download the ZIP for your platform from the [latest
+release](https://github.com/itama8/omakase-cadkit/releases), unzip it, and
+double-click `launch.cmd` on Windows or `launch.command` on macOS/Linux. The
+archive carries its own Node runtime and DWG/DXF sidecar, so nothing is installed
+and nothing is downloaded on first run. Builds exist for Linux x64, macOS Apple
+Silicon and Intel, and Windows x64; `START-HERE.txt` in the folder has the details.
+See [installing a download](docs/setup.md#install-a-download) and, for what an
+alpha does not do yet, [trying an alpha](docs/setup.md#trying-an-alpha).
 
-For manual developer setup: needs Node 23.6+, the .NET 8 SDK and runtime, and `uv`. See
-[setup for people and agents](docs/setup.md) for prerequisites, troubleshooting,
-optional tools, and tested platform limits. From your checkout:
+**Developer:** work from a checkout instead. It needs Node 23.6+, the .NET 8 SDK
+and runtime, and `uv`; `setup.cmd` on Windows or `bash setup.command` on
+macOS/Linux installs those locally into `.tools/` and builds and verifies the app.
+CI runs that Setup and opens a synthetic drawing through Launch on Linux x64,
+macOS on Apple Silicon and Intel, and Windows x64. See [setup](docs/setup.md) for
+prerequisites, troubleshooting, optional tools, and tested platform limits. From
+your checkout:
 
 ```bash
 cd /path/to/omakase-cadkit

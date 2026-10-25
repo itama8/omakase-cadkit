@@ -25,6 +25,9 @@ omakase-cadkit on drawings (not developing it) is covered by `skills/omakase-cad
   `dist/`, not the sources. `npm run setup` and `npm run build` include it.
 - `npm run typecheck` and `npm test` before calling work done. Tests need the sidecar built
   and `npm run fixtures` run once.
+- `npm run bundle` builds the download ZIP for the current platform (prebuilt sidecar, its
+  own Node runtime, compiled CLI, viewer). CI attaches those to a `v*` tag's release, so a
+  tester unzips and launches with no tools installed. Needs the .NET SDK and `zip`.
 - `node scripts/shot.mjs <viewer-url> out.png [w h] [--eval js]` screenshots the viewer
   headless once the drawing has loaded (needs `chromium`). Use it to check viewer changes.
 

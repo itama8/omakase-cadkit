@@ -112,3 +112,35 @@ jobs:
           curl.exe -fsS --compressed "http://127.0.0.1:4289/api/lint?file=$doc" -o "$out\lint.json"
           if ($LASTEXITCODE -ne 0) { throw 'lint request failed' }
           if (-not (Select-String -Path "$out\lint.json" -Pattern 'sewer-levels' -Quiet)) { throw 'no sewer-levels finding' }
+      # What testers download: the app with its Node and sidecar inside, so no tools are needed.
+      - name: Build the download bundle
+        run: npm run bundle
+      - name: Upload the download bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: download-${{ matrix.os }}
+          path: dist-bundle/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  release-assets:
+    name: Attach the downloads to the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [bootstrap]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist-bundle
+          merge-multiple: true
+      - name: Upload each platform ZIP to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -l dist-bundle
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --draft --title "omakase-cadkit ${GITHUB_REF_NAME#v}" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" dist-bundle/*.zip --clobber

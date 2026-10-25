@@ -1,10 +1,44 @@
-# Set up a source checkout
+# Install
 
-This route is for a person or an agent setting up the CLI and viewer from source.
-An installable npm library is a [later outcome](outcomes.md); do not use
-`npm install omakase-cadkit` as a substitute for these steps yet.
+Two routes. **A download** needs no tools and nothing after the download. **A source
+checkout** is for contributing and needs the toolchain. There is no npm package yet
+([later outcome](outcomes.md)), so `npm install omakase-cadkit` is not either route.
 
-## Automatic setup
+## Install a download
+
+Download the ZIP matching your computer from the [latest
+release](https://github.com/itama8/omakase-cadkit/releases), unzip it into a folder
+you keep, and launch it. The archive carries its own Node runtime and a prebuilt
+DWG/DXF sidecar, so it needs no Node, no .NET, no build step and no internet after
+the download.
+
+| Platform | File to download | Launch |
+|---|---|---|
+| Windows x64 | `omakase-cadkit-<version>-win32-x64.zip` | Double-click `launch.cmd` |
+| macOS Apple Silicon | `omakase-cadkit-<version>-darwin-arm64.zip` | Double-click `launch.command` |
+| macOS Intel | `omakase-cadkit-<version>-darwin-x64.zip` | Double-click `launch.command` |
+| Linux x64 | `omakase-cadkit-<version>-linux-x64.zip` | Run `bash launch.command` |
+
+Linux ARM64 has no download yet; use a source checkout, which builds its own sidecar.
+
+`START-HERE.txt` in the folder repeats these steps. The viewer opens on
+`http://127.0.0.1:4280/`; the folder icon opens a drawing in the viewer, and
+`launch.command` / `launch.cmd` also take CLI commands directly:
+
+```sh
+launch.cmd inspect "C:\Work\D5 & D6.dwg"          :: launch.command on macOS/Linux
+launch.cmd lint fixtures\sewer_bad.dxf
+```
+
+macOS may refuse an unsigned download. Right-click `launch.command` and choose
+**Open** once, or run `xattr -dr com.apple.quarantine omakase-cadkit-*` in the folder
+you extracted. Keeping the folder together matters: the runtime and sidecar live
+inside it.
+
+## Set up a source checkout
+
+This route is for a person or an agent working on the code, or on a platform with
+no download. Setup downloads the toolchain, builds the app and verifies it.
 
 Download the repository ZIP and extract it into a writable folder (or clone it).
 Keep that folder: it contains the app, its tools and the launchers.
@@ -137,10 +171,10 @@ node scripts/shot.mjs 'http://127.0.0.1:4280/?file=/absolute/path/to/fixtures/se
 
 ## Trying an alpha
 
-An alpha is a source ZIP plus Setup, not an installable package. There is no
+An alpha is a download, not an installable package. There is no
 `npm install omakase-cadkit` yet, no auto-update, and no installer for a system
-package manager. Keep the extracted folder; launching from it is the whole
-installation.
+package manager: you unzip a folder and launch it, and updating means downloading
+the next ZIP.
 
 What to try, in order: launch with no drawing, open a project drawing, run `lint`
 on it, click a finding, and use **Copy AutoCAD selection**. Then compare a few

@@ -11,3 +11,6 @@ dist/
 
 # User-local bootstrap tools and remembered tool paths
 .tools/
+
+# Per-platform download bundles built by npm run bundle
+dist-bundle/
