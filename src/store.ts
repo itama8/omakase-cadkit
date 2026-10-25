@@ -8,7 +8,7 @@ import path from "node:path";
 import { Sidecar } from "./sidecar.ts";
 import type { Drawing } from "./types.ts";
 
-export const CACHE_DIR = process.env.DRAWKIT_CACHE ?? path.join(process.env.XDG_CACHE_HOME ?? path.join(homedir(), ".cache"), "drawkit");
+export const CACHE_DIR = process.env.OMAKASE_CADKIT_CACHE ?? process.env.DRAWKIT_CACHE ?? path.join(process.env.XDG_CACHE_HOME ?? path.join(homedir(), ".cache"), "omakase-cadkit");
 
 export interface OpenResult {
   drawing: Drawing;

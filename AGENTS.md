@@ -1,12 +1,12 @@
 # AGENTS.md
 
-drawkit views, inspects and lints DWG/DXF drawings. Read `README.md` for the shape. Using
-drawkit on drawings (not developing it) is covered by `skills/drawkit/SKILL.md`.
+omakase-cadkit views, inspects and lints DWG/DXF drawings. Read `README.md` for the shape. Using
+omakase-cadkit on drawings (not developing it) is covered by `skills/omakase-cadkit/SKILL.md`.
 
 ## Commands
 
 - `npm run build:sidecar` after any change to `sidecar/Program.cs`. The payload cache is keyed
-  by file path, size and mtime, not by sidecar version: clear `~/.cache/drawkit` after a
+  by file path, size and mtime, not by sidecar version: clear `~/.cache/omakase-cadkit` after a
   payload change.
 - `npm run build:viewer` after any change under `viewer/`.
 - `npm run typecheck` and `npm test` before calling work done. Tests need the sidecar built
@@ -19,12 +19,12 @@ drawkit on drawings (not developing it) is covered by `skills/drawkit/SKILL.md`.
 - A rule earns its place by catching a real defect. Every new rule gets a planted defect in
   `fixtures/make_fixtures.py` (bad drawing) and must stay silent on the clean drawing.
 - Before believing a rule on a real drawing, check a sample of its findings against a second
-  source (the hydraulic model, the issued PDF, the raw entities via `drawkit query`). The
+  source (the hydraulic model, the issued PDF, the raw entities via `omakase-cadkit query`). The
   first versions of the sewer matcher produced hundreds of false findings that looked
   plausible; every one came from pairing labels to the wrong symbol.
 - Findings carry handles of real entities and a world bbox. Messages state the numbers that
   disagree, not just that something is wrong.
-- Engineering limits (minimum depth, minimum slope) come from `drawkit.json`, never from
+- Engineering limits (minimum depth, minimum slope) come from `omakase-cadkit.json`, never from
   defaults in code.
 
 ## Code

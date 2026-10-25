@@ -63,7 +63,7 @@ export function startServer(port = 4280, host = "127.0.0.1") {
         if (!file) return json(res, 400, { error: "file is required" });
         const r = await store.open(file);
         pushRecent(DrawingStore.resolve(file));
-        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store", "content-encoding": "gzip", "x-drawkit-ms": String(r.ms), "x-drawkit-cached": String(r.cached) });
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store", "content-encoding": "gzip", "x-omakase-cadkit-ms": String(r.ms), "x-omakase-cadkit-cached": String(r.cached) });
         createReadStream(r.payloadPath).pipe(createGzip({ level: 4 })).pipe(res);
         return;
       }
@@ -114,7 +114,7 @@ export function startServer(port = 4280, host = "127.0.0.1") {
     }
   });
   server.listen(port, host, () => {
-    console.log(`drawkit viewer on http://${host}:${port}/`);
+    console.log(`omakase-cadkit viewer on http://${host}:${port}/`);
   });
   const shutdown = () => {
     store.close();

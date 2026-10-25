@@ -1,4 +1,4 @@
-// Project profile: drawkit.json, found by walking up from the drawing's folder.
+// Project profile: omakase-cadkit.json, found by walking up from the drawing's folder.
 // It records what a drawing cannot say about itself (true units, paper, label conventions).
 
 import { existsSync, readFileSync } from "node:fs";
@@ -70,8 +70,10 @@ export function findConfig(fromFile: string): string | null {
   let dir = path.dirname(path.resolve(fromFile));
   const stop = path.dirname(homedir());
   while (dir && dir !== stop && dir !== path.dirname(dir)) {
-    const p = path.join(dir, "drawkit.json");
-    if (existsSync(p)) return p;
+    for (const name of ["omakase-cadkit.json", "drawkit.json"]) {
+      const p = path.join(dir, name);
+      if (existsSync(p)) return p;
+    }
     dir = path.dirname(dir);
   }
   return null;

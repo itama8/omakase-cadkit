@@ -41,7 +41,7 @@ const unitsDeclared: Rule = {
         handles: [],
       });
     } else if (/unitless/i.test(u.declared) && u.source !== "config") {
-      out.push({ rule: this.id, severity: "info", message: `No units declared; plotted sizes assume ${u.used}. Set "units" in drawkit.json.`, handles: [] });
+      out.push({ rule: this.id, severity: "info", message: `No units declared; plotted sizes assume ${u.used}. Set "units" in omakase-cadkit.json.`, handles: [] });
     }
     return out;
   },
@@ -102,7 +102,7 @@ const scaleMismatch: Rule = {
         out.push({
           rule: this.id,
           severity: "error",
-          message: `Declares ${d.ratios.map((r) => "1:" + fmt(r, 0)).join(", ")} but the frame plots at ${f.snapped ? "1:" : "≈1:"}${fmt(f.measured, f.measured < 20 ? 1 : 0)} on ${f.paper}${f.paperSource === "profile" ? "" : f.paperSource === "iso-fit" ? " (paper guessed from the frame; set \"paper\" in drawkit.json)" : " (paper assumed; set \"paper\" in drawkit.json)"} — ${fmt(Math.max(f.widthMm, f.heightMm) / 1000, 1)} m of drawing across the sheet. Off by a factor of ${fmt(Math.max(d.ratios[0], f.measured) / Math.min(d.ratios[0], f.measured), 1)}.`,
+          message: `Declares ${d.ratios.map((r) => "1:" + fmt(r, 0)).join(", ")} but the frame plots at ${f.snapped ? "1:" : "≈1:"}${fmt(f.measured, f.measured < 20 ? 1 : 0)} on ${f.paper}${f.paperSource === "profile" ? "" : f.paperSource === "iso-fit" ? " (paper guessed from the frame; set \"paper\" in omakase-cadkit.json)" : " (paper assumed; set \"paper\" in omakase-cadkit.json)"} — ${fmt(Math.max(f.widthMm, f.heightMm) / 1000, 1)} m of drawing across the sheet. Off by a factor of ${fmt(Math.max(d.ratios[0], f.measured) / Math.min(d.ratios[0], f.measured), 1)}.`,
           handles: [...d.handles, f.handle],
           bbox: bboxOf(ctx, d.handles) ? padBbox(bboxOf(ctx, d.handles)!, 2) : f.bbox,
           data: { declared: d.ratios, measured: f.measured, raw: f.rawRatio, paper: f.paper },
@@ -371,7 +371,7 @@ const outsideFrame: Rule = {
 const unrendered: Rule = {
   id: "unrendered",
   pack: "common",
-  title: "Entities drawkit could not draw",
+  title: "Entities omakase-cadkit could not draw",
   why: "Review covers what is drawn; these entity types are skipped by the viewer.",
   run(ctx) {
     const u = Object.entries(ctx.drawing.unrendered);

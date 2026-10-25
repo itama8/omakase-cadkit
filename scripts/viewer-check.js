@@ -2,7 +2,7 @@
 (async () => {
   const assert = (value, message) => { if (!value) throw new Error(message); };
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const v = drawkit.view;
+  const v = cadkit.view;
   const camera = () => [v.cx, v.cy, v.scale];
   const same = (a, b) => a.every((n, i) => Math.abs(n - b[i]) < 1e-8);
   // A subpixel circle must return at readable scale, rather than being removed at load.

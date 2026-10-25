@@ -3,11 +3,11 @@
 // machine that has the project drawings.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { loadConfig } from "../src/config.ts";
+import { findConfig, loadConfig } from "../src/config.ts";
 import { lintContext, lintSet, makeContext } from "../src/lint/engine.ts";
 import { sewerNetwork } from "../src/lint/sewer.ts";
 import { renderSvg } from "../src/render-svg.ts";
@@ -28,6 +28,31 @@ const rules = (fs: Finding[], sev?: string) => fs.filter((f) => !sev || f.severi
 before(() => {
   for (const f of ["sewer_clean.dxf", "sewer_bad.dxf", "scale_wrong.dxf"])
     if (!existsSync(path.join(FIX, f))) throw new Error(`missing fixture ${f}: run \`npm run fixtures\``);
+});
+
+describe("profile filenames", () => {
+  test("accepts legacy profiles, prefers the new name locally, and uses the nearest directory", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "omakase-cadkit-config-"));
+    try {
+      const child = path.join(dir, "drawings");
+      mkdirSync(child);
+      const file = path.join(child, "drawing.dwg");
+      const legacy = path.join(dir, "drawkit.json");
+      const canonical = path.join(dir, "omakase-cadkit.json");
+      writeFileSync(legacy, JSON.stringify({ units: "m" }));
+      assert.equal(findConfig(file), legacy);
+      assert.equal(loadConfig(file).units, "m");
+      writeFileSync(canonical, JSON.stringify({ units: "mm" }));
+      assert.equal(findConfig(file), canonical);
+      assert.equal(loadConfig(file).units, "mm");
+      const nearest = path.join(child, "drawkit.json");
+      writeFileSync(nearest, JSON.stringify({ units: "ft" }));
+      assert.equal(findConfig(file), nearest);
+      assert.equal(loadConfig(file).units, "ft");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("payload", () => {
@@ -146,7 +171,7 @@ describe("render", () => {
 
 describe("convert", () => {
   test("DXF -> DWG -> DXF keeps every entity", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "drawkit-test-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "omakase-cadkit-test-"));
     try {
       const dwg = path.join(dir, "bad.dwg");
       const r = await store.convert(path.join(FIX, "sewer_bad.dxf"), dwg);

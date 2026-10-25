@@ -1,4 +1,4 @@
-// Canvas renderer for a drawkit payload. Framework-free so it can move into another host
+// Canvas renderer for a omakase-cadkit payload. Framework-free so it can move into another host
 // (the Omakase renderer) unchanged: give it a canvas, a payload, and call draw().
 //
 // Strokes and fills are batched into Path2D objects per (tile, layer, colour) in drawing

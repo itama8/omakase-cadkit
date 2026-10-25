@@ -1,4 +1,4 @@
-"""Synthetic drawings with planted defects, for drawkit's tests.
+"""Synthetic drawings with planted defects, for omakase-cadkit's tests.
 
     uv run --with ezdxf python fixtures/make_fixtures.py fixtures
 

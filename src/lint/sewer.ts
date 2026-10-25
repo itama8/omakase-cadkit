@@ -1,5 +1,5 @@
 // Sewer network rules. The network is rebuilt from the drawing (symbols, pipe polylines and
-// their label clusters) using the project's conventions in drawkit.json, then checked.
+// their label clusters) using the project's conventions in omakase-cadkit.json, then checked.
 
 import type { FieldLayout, SewerConfig } from "../config.ts";
 import { bboxAround, dist, Grid, greedyMatch, lineAngleDiff, nearestSegment, padBbox, pointAlong, polyDist, unionBbox, type Pt } from "../geometry.ts";
@@ -305,9 +305,9 @@ const config: Rule = {
   why: "The sewer rules need to know which symbols and labels mean manholes and pipes.",
   run(ctx) {
     const n = net(ctx);
-    if (!n) return [{ rule: this.id, severity: "warning", message: 'The sewer pack is on but drawkit.json has no "sewer" section; sewer rules were skipped.', handles: [] }];
+    if (!n) return [{ rule: this.id, severity: "warning", message: 'The sewer pack is on but omakase-cadkit.json has no "sewer" section; sewer rules were skipped.', handles: [] }];
     if (n.manholes.length === 0)
-      return [{ rule: this.id, severity: "warning", message: `No manhole symbols found (blocks ${ctx.cfg.sewer!.manhole.blocks.join(", ")}). Check the sewer section of drawkit.json.`, handles: [] }];
+      return [{ rule: this.id, severity: "warning", message: `No manhole symbols found (blocks ${ctx.cfg.sewer!.manhole.blocks.join(", ")}). Check the sewer section of omakase-cadkit.json.`, handles: [] }];
     return [];
   },
 };

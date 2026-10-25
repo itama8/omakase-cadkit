@@ -1,4 +1,4 @@
-// drawkit CLI. Text output by default, --json for machines. `lint` exits 1 when it finds errors.
+// omakase-cadkit CLI. Text output by default, --json for machines. `lint` exits 1 when it finds errors.
 
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
@@ -12,24 +12,24 @@ import { workingScale } from "./sheet.ts";
 import { DrawingStore } from "./store.ts";
 import type { Bbox, Entity, Finding } from "./types.ts";
 
-const HELP = `drawkit — view, inspect and lint DWG/DXF drawings
+const HELP = `omakase-cadkit — view, inspect and lint DWG/DXF drawings
 
 usage:
-  drawkit inspect <file>                       summary: units, sheet, scale, layers, blocks
-  drawkit query <file> [filters]               entities as JSON lines
+  omakase-cadkit inspect <file>                       summary: units, sheet, scale, layers, blocks
+  omakase-cadkit query <file> [filters]               entities as JSON lines
       --type T  --layer L  --block B  --text REGEX  --handle H  --near x,y,r  --limit N
-  drawkit lint <file...> [--packs common,sewer] [--rule id,...] [--max N] [--json]
+  omakase-cadkit lint <file...> [--packs common,sewer] [--rule id,...] [--max N] [--json]
                                                exit 1 when any error is found
-  drawkit network <file> [--json|--csv]        sewer network schedule (needs a sewer profile)
-  drawkit render <file> --out a.svg|a.png [--handle H | --bbox x0,y0,x1,y1 | --finding N]
+  omakase-cadkit network <file> [--json|--csv]        sewer network schedule (needs a sewer profile)
+  omakase-cadkit render <file> --out a.svg|a.png [--handle H | --bbox x0,y0,x1,y1 | --finding N]
                 [--width px] [--dark]          draw a region; PNG needs rsvg-convert or magick
-  drawkit convert <in> <out.dwg|out.dxf>       DWG <-> DXF through ACadSharp, with a reread check
-  drawkit view <file> [--handle H]             open in the browser viewer (starts the server)
-  drawkit serve [--port 4280]                  run the viewer server
-  drawkit rules                                list lint rules
+  omakase-cadkit convert <in> <out.dwg|out.dxf>       DWG <-> DXF through ACadSharp, with a reread check
+  omakase-cadkit view <file> [--handle H]             open in the browser viewer (starts the server)
+  omakase-cadkit serve [--port 4280]                  run the viewer server
+  omakase-cadkit rules                                list lint rules
 
 options:
-  --config path/to/drawkit.json   project profile (default: nearest drawkit.json above the file)
+  --config path/to/omakase-cadkit.json   project profile (default: nearest omakase-cadkit.json above the file)
   --json                          machine output
 `;
 
@@ -192,7 +192,7 @@ function slimResult(r: LintResult) {
 async function cmdNetwork(store: DrawingStore, file: string, flags: Flags) {
   const ctx = await openWithCtx(store, file, flags);
   const n = sewerNetwork(ctx);
-  if (!n) throw new Error('no "sewer" section in drawkit.json for this drawing');
+  if (!n) throw new Error('no "sewer" section in omakase-cadkit.json for this drawing');
   const mh = n.manholes.map((m) => ({ id: m.id, handle: m.h, outfall: m.outfall, x: m.at[0], y: m.at[1], gl: m.gl, il: m.il, depth: m.depth }));
   const pipes = n.pipes.map((p) => ({
     id: p.id,
@@ -283,7 +283,7 @@ async function serverUp(port: number): Promise<boolean> {
 }
 
 async function cmdView(file: string, flags: Flags) {
-  const port = Number(str(flags, "port") ?? process.env.DRAWKIT_PORT ?? 4280);
+  const port = Number(str(flags, "port") ?? process.env.OMAKASE_CADKIT_PORT ?? process.env.DRAWKIT_PORT ?? 4280);
   if (!(await serverUp(port))) {
     const child = spawn(process.execPath, [path.join(import.meta.dirname, "server.ts"), "--port", String(port)], { detached: true, stdio: "ignore" });
     child.unref();
@@ -317,14 +317,14 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
   if (cmd === "view") {
-    if (!rest[0]) throw new Error("usage: drawkit view <file>");
+    if (!rest[0]) throw new Error("usage: omakase-cadkit view <file>");
     if (!existsSync(rest[0])) throw new Error(`no file at ${rest[0]}`);
     await cmdView(rest[0], flags);
     return 0;
   }
   const store = new DrawingStore();
   try {
-    if (!rest[0]) throw new Error(`usage: see drawkit help`);
+    if (!rest[0]) throw new Error(`usage: see omakase-cadkit help`);
     switch (cmd) {
       case "inspect":
         await cmdInspect(store, rest[0], flags);
@@ -341,7 +341,7 @@ export async function main(argv: string[]): Promise<number> {
         await cmdRender(store, rest[0], flags);
         return 0;
       case "convert": {
-        if (!rest[1]) throw new Error("usage: drawkit convert <in> <out.dwg|out.dxf>");
+        if (!rest[1]) throw new Error("usage: omakase-cadkit convert <in> <out.dwg|out.dxf>");
         const r = await store.convert(rest[0], rest[1]);
         console.log(flags.json ? JSON.stringify(r) : `${r.out}  ${r.entities} entities, ${r.acadVersion}, reread ok, ${r.ms} ms`);
         return 0;

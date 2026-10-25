@@ -15,7 +15,7 @@ if (!url || !out) {
   process.exit(2);
 }
 const port = 9300 + Math.floor(Math.random() * 500);
-const profile = mkdtempSync(path.join(tmpdir(), "drawkit-shot-"));
+const profile = mkdtempSync(path.join(tmpdir(), "omakase-cadkit-shot-"));
 const chrome = spawn(process.env.CHROMIUM ?? "chromium", ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, `--window-size=${w},${h}`, "about:blank"], { stdio: "ignore" });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let target;
@@ -49,7 +49,7 @@ try {
   let state = null;
   for (let i = 0; i < 240; i++) {
     await sleep(250);
-    state = await evaluate("window.drawkit && window.drawkit.state && window.drawkit.state()");
+    state = await evaluate("window.cadkit && window.cadkit.state && window.cadkit.state()");
     if (state?.ready) break;
   }
   if (!state?.ready) throw new Error("drawing and lint did not become ready");
@@ -57,7 +57,7 @@ try {
   if (process.argv.includes("--check")) {
     console.log("checks:", JSON.stringify(await evaluate(readFileSync(new URL("./viewer-check.js", import.meta.url), "utf8"))));
     // Use real browser input to cover pointer capture, drag thresholds and release cleanup.
-    const drag = await evaluate(`(() => { const v = drawkit.view; const r = v.canvas.getBoundingClientRect(); return { x: Math.round(r.left + r.width * .8), y: Math.round(r.top + r.height * .6), dx: -2 * Math.round(r.width * .3), dy: -2 * Math.round(r.height * .125), cx: v.cx, cy: v.cy, scale: v.scale, selected: v.selected.size }; })()`);
+    const drag = await evaluate(`(() => { const v = cadkit.view; const r = v.canvas.getBoundingClientRect(); return { x: Math.round(r.left + r.width * .8), y: Math.round(r.top + r.height * .6), dx: -2 * Math.round(r.width * .3), dy: -2 * Math.round(r.height * .125), cx: v.cx, cy: v.cy, scale: v.scale, selected: v.selected.size }; })()`);
     await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: drag.x, y: drag.y });
     await send("Input.dispatchMouseEvent", { type: "mousePressed", x: drag.x, y: drag.y, button: "left", buttons: 1, clickCount: 1 });
     for (let i = 1; i <= 48; i++) {
@@ -67,15 +67,15 @@ try {
     }
     await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: drag.x + drag.dx / 2, y: drag.y + drag.dy / 2, button: "left", buttons: 0, clickCount: 1 });
     await sleep(50);
-    const end = await evaluate("({cx: drawkit.view.cx, cy: drawkit.view.cy, panning: drawkit.view.canvas.classList.contains('panning'), selected: drawkit.view.selected.size, coordinates: document.querySelector('#coords').textContent})");
+    const end = await evaluate("({cx: cadkit.view.cx, cy: cadkit.view.cy, panning: cadkit.view.canvas.classList.contains('panning'), selected: cadkit.view.selected.size, coordinates: document.querySelector('#coords').textContent})");
     if (end.panning || end.selected !== drag.selected || end.coordinates === '—' || Math.abs(end.cx - (drag.cx - drag.dx / (2 * drag.scale))) > 1e-6 || Math.abs(end.cy - (drag.cy + drag.dy / (2 * drag.scale))) > 1e-6) throw new Error(`pointer drag failed: ${JSON.stringify({ drag, end })}`);
     await evaluate("document.querySelector('#fit').click()");
     console.log("pointer drag: passed");
   }
   if (pre) console.log("eval:", JSON.stringify(await evaluate(pre)));
   await sleep(400);
-  await evaluate("window.drawkit && window.drawkit.view.draw()");
-  state = await evaluate("window.drawkit && window.drawkit.state()");
+  await evaluate("window.cadkit && window.cadkit.view.draw()");
+  state = await evaluate("window.cadkit && window.cadkit.state()");
   const shot = await send("Page.captureScreenshot", { format: "png" });
   writeFileSync(out, Buffer.from(shot.result.data, "base64"));
   console.log(out, JSON.stringify(state));

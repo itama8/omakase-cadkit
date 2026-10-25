@@ -1,8 +1,8 @@
-// drawkit sidecar: reads DWG/DXF with ACadSharp and writes a flat drawing payload.
+// omakase-cadkit sidecar: reads DWG/DXF with ACadSharp and writes a flat drawing payload.
 //
-//   drawkit-sidecar serve                 JSON lines on stdin/stdout (used by the Node service)
-//   drawkit-sidecar open <in> <out.json>  one-shot payload, for debugging
-//   drawkit-sidecar convert <in> <out>    DWG <-> DXF by output extension
+//   omakase-cadkit-sidecar serve                 JSON lines on stdin/stdout (used by the Node service)
+//   omakase-cadkit-sidecar open <in> <out.json>  one-shot payload, for debugging
+//   omakase-cadkit-sidecar convert <in> <out>    DWG <-> DXF by output extension
 //
 // Requests:  {"id":1,"method":"open","params":{"path":"/a.dwg","out":"/cache/a.json"}}
 //            {"id":2,"method":"convert","params":{"path":"/a.dxf","out":"/b.dwg"}}
@@ -36,7 +36,7 @@ static class Program
 			Console.WriteLine(Ops.Convert(args[1], args[2]).ToJsonString());
 			return 0;
 		}
-		Console.Error.WriteLine("usage: drawkit-sidecar serve | open <in> <out.json> | convert <in> <out.dwg|out.dxf>");
+		Console.Error.WriteLine("usage: omakase-cadkit-sidecar serve | open <in> <out.json> | convert <in> <out.dwg|out.dxf>");
 		return 2;
 	}
 

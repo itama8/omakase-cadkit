@@ -1,4 +1,4 @@
-# drawkit
+# omakase-cadkit
 
 View, inspect and lint AutoCAD drawings (DWG and DXF) for civil infrastructure: sewer
 networks, layouts, sections, detail sheets. It is built for an agent and a reviewer working
@@ -11,7 +11,7 @@ would use: a supervised sidecar owns the file format, a service owns files and l
 framework-free canvas renders bounded JSON.
 
 ```
-DWG/DXF ──> sidecar (C#, ACadSharp)  ──payload JSON──>  cache (~/.cache/drawkit)
+DWG/DXF ──> sidecar (C#, ACadSharp)  ──payload JSON──>  cache (~/.cache/omakase-cadkit)
                                                      │
                        Node service: sheet analysis, lint rules, network rebuild
                          │                          │
@@ -28,23 +28,23 @@ npm install
 npm run build            # sidecar + viewer bundle
 npm run fixtures         # synthetic test drawings
 npm test
-ln -s "$PWD/bin/drawkit.mjs" ~/.local/bin/drawkit   # optional
+ln -s "$PWD/bin/omakase-cadkit.mjs" ~/.local/bin/omakase-cadkit   # optional
 ```
 
 ## Use
 
 ```bash
-drawkit inspect drawing.dwg                 # units, frame, scale, layers, blocks
-drawkit lint drawing.dwg [more.dwg ...]     # findings; exit 1 on errors; --json
-drawkit query drawing.dwg --layer NODE --text '^MH-' --limit 5
-drawkit network drawing.dwg --csv           # manhole/pipe schedule from the drawing
-drawkit render drawing.dwg --finding 3 --out f.png
-drawkit view drawing.dwg --handle 5DF85     # URL to the viewer, zoomed on the entity
-drawkit convert in.dxf out.dwg              # DWG <-> DXF, reread to verify
-drawkit rules                               # every rule and why it exists
+omakase-cadkit inspect drawing.dwg                 # units, frame, scale, layers, blocks
+omakase-cadkit lint drawing.dwg [more.dwg ...]     # findings; exit 1 on errors; --json
+omakase-cadkit query drawing.dwg --layer NODE --text '^MH-' --limit 5
+omakase-cadkit network drawing.dwg --csv           # manhole/pipe schedule from the drawing
+omakase-cadkit render drawing.dwg --finding 3 --out f.png
+omakase-cadkit view drawing.dwg --handle 5DF85     # URL to the viewer, zoomed on the entity
+omakase-cadkit convert in.dxf out.dwg              # DWG <-> DXF, reread to verify
+omakase-cadkit rules                               # every rule and why it exists
 ```
 
-The viewer (`drawkit serve`, default `http://127.0.0.1:4280`, loopback only) has layers, text
+The viewer (`omakase-cadkit serve`, default `http://127.0.0.1:4280`, loopback only) has layers, text
 search, findings with jump-to, an entity inspector, and sheet facts. `F` fits, `J`/`K` step
 through findings, `/` searches text, clicking an entity inspects it. URLs carry `#h=HANDLE`
 or `#f=N`, so an agent can hand over an exact place.
@@ -66,7 +66,7 @@ node scripts/shot.mjs 'http://127.0.0.1:4280/?file=/absolute/path/to/drawing.dwg
 
 ## Project profile
 
-A `drawkit.json` in the drawing's folder or any parent sets what the file cannot say about
+An `omakase-cadkit.json` in the drawing's folder or any parent sets what the file cannot say about
 itself:
 
 | key | meaning |
@@ -78,13 +78,16 @@ itself:
 | `packs` | rule packs to run: `common`, `sewer` |
 | `sewer` | manhole and outfall blocks, label regexes and layout, pipe layer, flow-arrow block, tolerances, and engineering limits (`minDepth`, `maxDepth`, `minSlope`) |
 
-`fixtures/drawkit.json` is a complete example.
+`fixtures/omakase-cadkit.json` is a complete example. Existing `drawkit.json` profiles
+are also accepted; at each directory the new filename takes precedence. The `drawkit` CLI
+remains available as a compatibility alias. Set `OMAKASE_CADKIT_CACHE` to override the
+cache directory (`DRAWKIT_CACHE` is also accepted).
 
 ## Rules
 
 `common`: units, sheet frame and drawing number, declared vs measured scale, plotted text
 height, stacked duplicates, linked rasters/xrefs/OLE, overridden dimensions, content outside
-the frame, hidden layers, degenerate entities, and entity types drawkit cannot draw.
+the frame, hidden layers, degenerate entities, and entity types omakase-cadkit cannot draw.
 
 `sewer`: every manhole has one label and one number, stacked symbols, GL − IL = depth and
 depth limits, labelled vs drawn pipe length, pipes ending at manholes and network parts,
@@ -107,7 +110,7 @@ src/cli.ts, server.ts   CLI and loopback viewer server
 viewer/                 canvas renderer and UI, no framework
 fixtures/               generator for synthetic drawings with planted defects
 test/                   end-to-end tests (+ a local real-drawing regression)
-skills/drawkit/         agent skill for using drawkit on drawings
+skills/omakase-cadkit/         agent skill for using omakase-cadkit on drawings
 ```
 
 ## Limits

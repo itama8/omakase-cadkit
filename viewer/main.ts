@@ -1,4 +1,4 @@
-// drawkit viewer: file open, layers, text search, lint findings and entity inspection
+// omakase-cadkit viewer: file open, layers, text search, lint findings and entity inspection
 // around the DrawingCanvas renderer.
 
 import type { Drawing, Finding, Severity } from "../src/types.ts";
@@ -100,8 +100,8 @@ async function open(path: string, opts: { hash?: string } = {}) {
   try {
     const res = await fetch(`/api/drawing?file=${encodeURIComponent(path)}`);
     if (!res.ok) throw new Error((await res.json()).error ?? res.statusText);
-    const serverMs = Number(res.headers.get("x-drawkit-ms") ?? 0);
-    const cached = res.headers.get("x-drawkit-cached") === "true";
+    const serverMs = Number(res.headers.get("x-omakase-cadkit-ms") ?? res.headers.get("x-drawkit-ms") ?? 0);
+    const cached = (res.headers.get("x-omakase-cadkit-cached") ?? res.headers.get("x-drawkit-cached")) === "true";
     const loaded = (await res.json()) as Drawing;
     if (request !== openRequest) return;
     drawing = loaded;
@@ -113,7 +113,7 @@ async function open(path: string, opts: { hash?: string } = {}) {
     renderMeta();
     overlay(null);
     $("#perf").title = `server ${serverMs} ms (${cached ? "cached" : "converted"}), total ${(performance.now() - t0).toFixed(0)} ms`;
-    document.title = `${path.split("/").pop()} — drawkit`;
+    document.title = `${path.split("/").pop()} — omakase-cadkit`;
     const revision = view.viewRevision;
     await runLint(revision);
     if (request !== openRequest) return;
@@ -264,7 +264,7 @@ async function runLint(initialRevision?: number) {
   }
   packs = lint!.packs;
   $("#packs").innerHTML = lint!.availablePacks.map((p) => `<label><input type="checkbox" data-pack="${p}" ${packs!.includes(p) ? "checked" : ""}/> ${p}</label>`).join("");
-  $("#profile").innerHTML = lint!.profile ? `profile <code>${esc(lint!.profile)}</code>` : `no drawkit.json found; using defaults`;
+  $("#profile").innerHTML = lint!.profile ? `profile <code>${esc(lint!.profile)}</code>` : `no omakase-cadkit.json found; using defaults`;
   for (const s of ["error", "warning", "info"] as Severity[]) $(`#n-${s}`).textContent = String(lint!.counts[s]);
   $("#finding-badge").textContent = lint!.counts.error ? String(lint!.counts.error) : "";
   renderFindings();
@@ -571,7 +571,7 @@ window.addEventListener("keydown", (e) => {
 // ------------------------------------------------------------------ boot
 
 // automation handle: agents and tests can drive the view without synthesising pointer events
-(window as any).drawkit = {
+(window as any).cadkit = {
   view,
   open,
   select: (handles: string[]) => select(handles.map((h) => byHandle.get(h.toUpperCase())).filter((x): x is number => x !== undefined), true),
@@ -585,6 +585,9 @@ window.addEventListener("keydown", (e) => {
   },
   state: () => ({ file, ready: Boolean(lint?.findings), entities: drawing?.entities.length ?? 0, findings: lint?.findings.length ?? 0, drawMs: view.lastDrawMs, labels: view.lastTextCount }),
 };
+
+// Compatibility for existing browser automation.
+(window as any).drawkit = (window as any).cadkit;
 
 const initial = new URL(location.href).searchParams.get("file");
 loadRecent();
