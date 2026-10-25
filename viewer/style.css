@@ -799,7 +799,6 @@ html[data-theme="light"] .tool-group { box-shadow: 0 6px 18px #4a3f2a1f; }
   transform: translateX(-50%);
   background: var(--raised);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--accent);
   border-radius: 6px;
   padding: 8px 14px;
   font-size: var(--fs-body);
@@ -807,7 +806,7 @@ html[data-theme="light"] .tool-group { box-shadow: 0 6px 18px #4a3f2a1f; }
   z-index: 4;
   max-width: min(520px, 80%);
 }
-.overlay.error { border-left-color: var(--error); color: var(--text); }
+.overlay.error { color: var(--text); }
 .hidden, .empty.hidden { display: none; }
 .empty {
   position: absolute;
