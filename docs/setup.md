@@ -109,6 +109,15 @@ loopback URL, starts a background server if needed, and opens the URL in your br
 when run from a terminal (`--no-open` to skip; piped output never opens one). If the
 running server came from an older build, `view` replaces it. Paths may start with `~`,
 even inside quotes, which you need for folder names with spaces or `&`.
+From a ZIP install, the launcher runs any command with the Node and .NET that Setup
+saved, so nothing has to be on PATH:
+
+```sh
+bash launch.command inspect fixtures/sewer_clean.dxf    # launch.cmd on Windows
+bash launch.command lint fixtures/sewer_bad.dxf
+bash launch.command view '~/Work/My Job/D5 & D6.dwg'
+```
+
 After `npm link`, just run `omakase-cadkit` from any folder to launch the app with
 no drawing loaded. Without linking, run `node bin/omakase-cadkit.mjs` from this checkout.
 `view` also accepts no file. Both reuse the background server and open a fresh root URL;
