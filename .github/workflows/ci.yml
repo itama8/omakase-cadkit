@@ -54,7 +54,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-2022]
+        # macos-14 is Apple Silicon, macos-15-intel is Intel: both Mac architectures.
+        os: [ubuntu-24.04, macos-14, macos-15-intel, windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:
@@ -78,3 +79,36 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: launch.cmd --no-open --port 4289
+      # The launcher is what a tester uses: saved local tools, a real drawing, sidecar and
+      # viewer. A green setup is not enough, the drawing has to open through it.
+      - name: Open a drawing through Launch (macOS and Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash launch.command view fixtures/sewer_bad.dxf --no-open --port 4289
+          doc="$(pwd)/fixtures/sewer_bad.dxf"
+          out="${RUNNER_TEMP:-/tmp}"
+          curl -fsS --compressed "http://127.0.0.1:4289/api/health" -o "$out/health.json"
+          grep -q omakase-cadkit "$out/health.json"
+          curl -fsS --compressed "http://127.0.0.1:4289/api/drawing?file=$doc" -o "$out/drawing.json"
+          grep -q '"prims"' "$out/drawing.json"
+          curl -fsS --compressed "http://127.0.0.1:4289/api/lint?file=$doc" -o "$out/lint.json"
+          grep -q sewer-levels "$out/lint.json"
+      - name: Open a drawing through Launch (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          cmd /c launch.cmd view fixtures\sewer_bad.dxf --no-open --port 4289
+          if ($LASTEXITCODE -ne 0) { throw "view failed with exit code $LASTEXITCODE" }
+          $doc = (Get-Location).Path + '\fixtures\sewer_bad.dxf'
+          $out = $env:RUNNER_TEMP
+          curl.exe -fsS --compressed 'http://127.0.0.1:4289/api/health' -o "$out\health.json"
+          if ($LASTEXITCODE -ne 0) { throw 'health request failed' }
+          if (-not (Select-String -Path "$out\health.json" -Pattern 'omakase-cadkit' -Quiet)) { throw 'health does not name the app' }
+          curl.exe -fsS --compressed "http://127.0.0.1:4289/api/drawing?file=$doc" -o "$out\drawing.json"
+          if ($LASTEXITCODE -ne 0) { throw 'drawing request failed' }
+          if (-not (Select-String -Path "$out\drawing.json" -Pattern '"prims"' -Quiet)) { throw 'drawing has no prims' }
+          curl.exe -fsS --compressed "http://127.0.0.1:4289/api/lint?file=$doc" -o "$out\lint.json"
+          if ($LASTEXITCODE -ne 0) { throw 'lint request failed' }
+          if (-not (Select-String -Path "$out\lint.json" -Pattern 'sewer-levels' -Quiet)) { throw 'no sewer-levels finding' }

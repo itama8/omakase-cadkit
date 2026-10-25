@@ -102,6 +102,15 @@ static class Ops
 		throw new ArgumentException("not a .dwg or .dxf file: " + path);
 	}
 
+	// Two viewers, or a viewer and a test run, can write the same payload at once. A unique
+	// sibling avoids two writers sharing one temp file, which Windows rejects outright.
+	static string TempFor(string outPath) => outPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+
+	static void TryDelete(string path)
+	{
+		try { if (File.Exists(path)) File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+	}
+
 	public static JsonObject Open(string path, string outPath)
 	{
 		var sw = Stopwatch.StartNew();
@@ -110,14 +119,18 @@ static class Ops
 		var readMs = sw.ElapsedMilliseconds;
 		sw.Restart();
 		Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath)));
-		var tmp = outPath + ".tmp";
+		var tmp = TempFor(outPath);
 		Payload.Stats stats;
-		using (var fs = File.Create(tmp))
-		using (var w = new Utf8JsonWriter(fs))
+		try
 		{
-			stats = new Payload(doc, w).Write(path, notes);
+			using (var fs = File.Create(tmp))
+			using (var w = new Utf8JsonWriter(fs))
+			{
+				stats = new Payload(doc, w).Write(path, notes);
+			}
+			File.Move(tmp, outPath, true);
 		}
-		File.Move(tmp, outPath, true);
+		finally { TryDelete(tmp); }
 		return new JsonObject
 		{
 			["path"] = path,
@@ -141,17 +154,21 @@ static class Ops
 		var notes = new Dictionary<string, int>();
 		var doc = Read(path, notes);
 		var ext = Path.GetExtension(outPath).ToLowerInvariant();
-		var tmp = outPath + ".tmp" + ext;
-		if (ext == ".dxf") DxfWriter.Write(tmp, doc, false);
-		else if (ext == ".dwg")
+		var tmp = TempFor(outPath) + ext;
+		try
 		{
-			// DwgWriter cannot write AC1021 (R2007); R2018 is the widest-read target.
-			if (doc.Header.Version < ACadVersion.AC1014 || doc.Header.Version == ACadVersion.AC1021)
-				doc.Header.Version = ACadVersion.AC1032;
-			DwgWriter.Write(tmp, doc);
+			if (ext == ".dxf") DxfWriter.Write(tmp, doc, false);
+			else if (ext == ".dwg")
+			{
+				// DwgWriter cannot write AC1021 (R2007); R2018 is the widest-read target.
+				if (doc.Header.Version < ACadVersion.AC1014 || doc.Header.Version == ACadVersion.AC1021)
+					doc.Header.Version = ACadVersion.AC1032;
+				DwgWriter.Write(tmp, doc);
+			}
+			else throw new ArgumentException("output must end in .dwg or .dxf");
+			File.Move(tmp, outPath, true);
 		}
-		else throw new ArgumentException("output must end in .dwg or .dxf");
-		File.Move(tmp, outPath, true);
+		finally { TryDelete(tmp); }
 		// Read back what was written: a converter that cannot reread its own output has failed.
 		var back = Read(outPath, new Dictionary<string, int>());
 		int before = doc.Entities.Count(), after = back.Entities.Count();
