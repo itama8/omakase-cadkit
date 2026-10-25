@@ -144,6 +144,7 @@ jobs:
         run: |
           set -euo pipefail
           ls -l dist-bundle
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" --draft --title "omakase-cadkit ${GITHUB_REF_NAME#v}" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" dist-bundle/*.zip --clobber
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
+              --title "omakase-cadkit ${GITHUB_REF_NAME#v}" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" dist-bundle/*.zip --repo "$GITHUB_REPOSITORY" --clobber
