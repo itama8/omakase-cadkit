@@ -1,7 +1,8 @@
 // Project profile: omakase-cadkit.json, found by walking up from the drawing's folder.
 // It records what a drawing cannot say about itself (true units, paper, label conventions).
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -93,6 +94,27 @@ export function loadConfig(forFile: string, explicit?: string): Config {
     } as SewerConfig;
   }
   return cfg;
+}
+
+/** Viewer edits stay beside the drawing, never changing a shared ancestor profile.
+ * Copy inherited settings before shadowing that profile, including unknown extension keys. */
+export function saveUnits(forFile: string, units: unknown): string {
+  if (units !== null && !["mm", "cm", "m", "in", "ft"].includes(units as string))
+    throw new Error("Choose mm, cm, m, in, ft, or automatic units.");
+  const source = findConfig(forFile);
+  const raw = source ? JSON.parse(readFileSync(source, "utf8")) : {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("The project profile must be a JSON object.");
+  if (units === null) delete raw.units;
+  else raw.units = units;
+  const target = path.join(path.dirname(path.resolve(forFile)), "omakase-cadkit.json");
+  const temp = `${target}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify(raw, null, 2) + "\n", { flag: "wx" });
+    renameSync(temp, target);
+  } finally {
+    if (existsSync(temp)) unlinkSync(temp);
+  }
+  return target;
 }
 
 /** Millimetres per drawing unit. */

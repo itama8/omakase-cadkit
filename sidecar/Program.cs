@@ -246,7 +246,7 @@ sealed class Payload
 		var w = _w;
 		var h = _doc.Header;
 		w.WriteStartObject();
-		w.WriteNumber("schema", 3);
+		w.WriteNumber("schema", 5);
 		w.WriteStartObject("source");
 		w.WriteString("path", path);
 		w.WriteString("format", Path.GetExtension(path).TrimStart('.').ToLowerInvariant());
@@ -790,6 +790,9 @@ sealed class Payload
 					var loops = new List<List<(double, double)>>();
 					foreach (var path in ht.Paths)
 					{
+						// Text-box paths are annotation metadata, not geometric fill
+						// boundaries. In particular they must not cut through a frame.
+						if ((path.Flags & (BoundaryPathFlags.Textbox | BoundaryPathFlags.TextIsland)) != 0) continue;
 						var loop = new List<(double, double)>();
 						foreach (var edge in path.Edges)
 						{
@@ -797,7 +800,8 @@ sealed class Payload
 							try { ee = edge.ToEntity(); } catch { continue; }
 							loop.AddRange(EdgePoints(ee));
 						}
-						if (loop.Count >= 3) loops.Add(loop);
+						if (loop.Count < 3) continue;
+						loops.Add(loop);
 					}
 					PrimFill(layer, rgb, ht.IsSolid, loops, t.Then(Affine.Ocs(ht.Normal)));
 					break;

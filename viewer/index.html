@@ -10,6 +10,12 @@
   </head>
   <body>
     <svg class="sprite" aria-hidden="true" focusable="false">
+      <symbol id="i-properties" viewBox="0 0 24 24">
+        <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" stroke-width="1.5" />
+        <path d="M8 3v6M16 9v6M10 15v6" fill="none" stroke="currentColor" stroke-width="3" />
+      </symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></symbol>
       <symbol id="i-mark" viewBox="0 0 24 24">
         <path d="M3.5 3.5h17v17h-17z" fill="none" stroke="currentColor" stroke-width="1.4" />
         <path d="M3.5 9h17M9 9v11.5" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".45" />
@@ -92,6 +98,9 @@
       <div class="head-right">
         <div id="meta" class="meta"></div>
         <div class="head-actions">
+          <button id="properties-button" class="icon-btn" title="Drawing properties" aria-label="Drawing properties" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-properties" /></svg>
+          </button>
           <button id="theme-toggle" class="icon-btn" title="Switch between graphite and paper" aria-label="Toggle paper theme" aria-pressed="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sun" /></svg>
           </button>
@@ -261,6 +270,36 @@
       <span id="perf" class="status-item"></span>
       <span class="status-item status-end micro-label">model space</span>
     </footer>
+
+    <dialog id="properties-dialog" aria-labelledby="properties-title">
+      <div class="dialog-head">
+        <h2 id="properties-title">Drawing properties</h2>
+        <button id="properties-close" class="icon-btn" aria-label="Close properties"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close" /></svg></button>
+      </div>
+      <form id="properties-form">
+        <fieldset class="unit-field">
+          <legend>Drawing units</legend>
+          <div class="unit-options">
+            <label title="Use the file header or automatic detection"><input type="radio" name="units" value="auto" /><span><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-refresh" /></svg>Auto</span></label>
+            <label title="Millimetres"><input type="radio" name="units" value="mm" aria-label="Millimetres" /><span>mm</span></label>
+            <label title="Centimetres"><input type="radio" name="units" value="cm" aria-label="Centimetres" /><span>cm</span></label>
+            <label title="Metres"><input type="radio" name="units" value="m" aria-label="Metres" /><span>m</span></label>
+            <label title="Inches"><input type="radio" name="units" value="in" aria-label="Inches" /><span>in</span></label>
+            <label title="Feet"><input type="radio" name="units" value="ft" aria-label="Feet" /><span>ft</span></label>
+          </div>
+        </fieldset>
+        <div class="unit-preview">
+          <svg viewBox="0 0 320 44" aria-hidden="true"><path d="M12 30h296M12 12v24M86 20v10M160 12v18M234 20v10M308 12v24" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
+          <output id="unit-preview"></output>
+        </div>
+        <div class="properties-facts"><span>File header</span><span id="properties-header"></span></div>
+        <p class="properties-scope">Applies to drawings in this folder</p>
+        <div id="properties-folder" class="properties-folder"></div>
+        <p class="properties-note">Sets how sizes are read. DWG geometry stays unchanged.</p>
+        <p id="properties-message" role="status" aria-live="polite"></p>
+        <div class="properties-footer"><button type="submit" id="properties-apply" class="has-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check" /></svg>Apply</button></div>
+      </form>
+    </dialog>
 
     <dialog id="help-dialog" aria-labelledby="help-title">
       <div class="dialog-head">

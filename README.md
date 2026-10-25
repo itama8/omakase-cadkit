@@ -22,7 +22,13 @@ DWG/DXF ──> sidecar (C#, ACadSharp)  ──payload JSON──>  cache (~/.ca
 
 ## Setup
 
-Needs Node 23.6+, the .NET 8 SDK and runtime, and `uv`. See
+For automatic setup, download and extract the repository, then use **`setup.cmd` on
+Windows** or **`bash setup.command` on macOS/Linux**. It checks dependencies,
+installs missing tools locally, and builds and verifies the app. Afterward, use
+`launch.cmd` or `launch.command` to open the empty viewer. Linux x64 is locally
+verified; Windows/macOS verification remains pending. See [setup](docs/setup.md).
+
+For manual developer setup: needs Node 23.6+, the .NET 8 SDK and runtime, and `uv`. See
 [setup for people and agents](docs/setup.md) for prerequisites, troubleshooting,
 optional tools, and tested platform limits. From your checkout:
 
@@ -48,7 +54,12 @@ optionally run `npm link` to make the short command available.
 
 ## Use
 
+Run `omakase-cadkit` with no arguments to launch the app with no drawing loaded.
+Use the folder icon or recent drawings to open a file. From the source checkout,
+`node bin/omakase-cadkit.mjs` does the same.
+
 ```bash
+omakase-cadkit                                     # launch an empty viewer
 omakase-cadkit inspect drawing.dwg                 # units, frame, scale, layers, blocks
 omakase-cadkit lint drawing.dwg [more.dwg ...]     # findings; exit 1 on errors; --json
 omakase-cadkit query drawing.dwg --layer NODE --text '^MH-' --limit 5
@@ -69,6 +80,14 @@ Drag with the left or middle button to pan; use the wheel or the +/− buttons t
 The drawing toolbar includes Fit, Back (also `Alt+Left`), and buttons to hide either side
 panel. Selecting a finding keeps the finding list open and highlights it on the drawing;
 enable **Show all finding markers** to see the other findings too. Re-running lint preserves your view.
+Use the sliders icon in the header (or click the unit badge) to open **Drawing properties**.
+Choose `mm`, `cm`, `m`, `in`, `ft`, or **Auto**, then Apply. The ruler previews the unit size;
+the badge, sheet facts and findings update immediately. This saves a profile beside the drawing
+and applies to other drawings in that folder and inheriting subfolders. Existing profile settings
+are preserved; inherited settings are copied locally so an ancestor profile stays unchanged.
+Auto removes the unit override and returns to the normal header/detection logic. It does not
+rescale or edit the DWG. The panel keeps the original file-header units visible for comparison.
+
 The renderer reuses image tiles while panning, rendering only newly exposed strips, and skips geometry smaller than a pixel
 at sheet scale; those details appear as you zoom in. Linked raster underlays (`IMAGE`) draw beneath the
 vector geometry when the referenced file is next to the drawing; the viewer streams it from the local

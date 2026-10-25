@@ -8,3 +8,6 @@ fixtures/*.dwg
 fixtures/*.png
 .cache/
 dist/
+
+# User-local bootstrap tools and remembered tool paths
+.tools/

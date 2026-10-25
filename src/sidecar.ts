@@ -11,13 +11,18 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 export function sidecarCommand(): { cmd: string; args: string[]; env: NodeJS.ProcessEnv } {
   const dir = process.env.OMAKASE_CADKIT_SIDECAR_DIR ?? process.env.DRAWKIT_SIDECAR_DIR ?? path.join(ROOT, "bin", "sidecar");
-  const exe = path.join(dir, "omakase-cadkit-sidecar");
+  const exeName = process.platform === "win32" ? "omakase-cadkit-sidecar.exe" : "omakase-cadkit-sidecar";
+  const dotnetName = process.platform === "win32" ? "dotnet.exe" : "dotnet";
+  const exe = path.join(dir, exeName);
   const dll = path.join(dir, "omakase-cadkit-sidecar.dll");
   const env: NodeJS.ProcessEnv = { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: "1", DOTNET_NOLOGO: "1" };
   const dotnetRoot = process.env.DOTNET_ROOT ?? path.join(homedir(), ".dotnet");
   if (existsSync(dotnetRoot)) env.DOTNET_ROOT = dotnetRoot;
   if (existsSync(exe)) return { cmd: exe, args: [], env };
-  if (existsSync(dll)) return { cmd: path.join(dotnetRoot, "dotnet"), args: [dll], env };
+  if (existsSync(dll)) {
+    const local = path.join(dotnetRoot, dotnetName);
+    return { cmd: existsSync(local) ? local : dotnetName, args: [dll], env };
+  }
   throw new Error(`omakase-cadkit sidecar is not built: run \`npm run build:sidecar\` (looked in ${dir})`);
 }
 

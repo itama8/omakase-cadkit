@@ -48,3 +48,33 @@ jobs:
         run: npm run consumer
         env:
           OMAKASE_CADKIT_CACHE: ${{ runner.temp }}/omakase-cadkit-consumer-cache
+
+  bootstrap:
+    name: Bootstrap (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      # Force local tools so runner-provided dependencies cannot hide download failures.
+      - name: Bootstrap on macOS and Linux
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash setup.command --local-tools
+      - name: Bootstrap on Windows
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/bootstrap.ps1 -LocalTools
+      - name: Launch without a drawing (macOS and Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash launch.command --no-open --port 4289
+      - name: Launch without a drawing (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: launch.cmd --no-open --port 4289

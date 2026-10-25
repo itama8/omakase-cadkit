@@ -6,11 +6,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createGzip } from "node:zlib";
-import { loadConfig } from "./config.ts";
+import { loadConfig, saveUnits } from "./config.ts";
 import { lintContext, makeContext, RULES } from "./lint/engine.ts";
 import { sewerNetwork } from "./lint/sewer.ts";
 import { buildStamp } from "./sidecar.ts";
 import { CACHE_DIR, DrawingStore, expandHome } from "./store.ts";
+import { resolveUnits } from "./sheet.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const VIEWER = path.join(ROOT, "viewer");
@@ -66,14 +67,16 @@ const fileParam = (url: URL) => {
 
 export function startServer(port = 4280, host = "127.0.0.1") {
   const store = new DrawingStore(4);
-  const ctxCache = new Map<string, { key: unknown; ctx: ReturnType<typeof makeContext> }>();
+  const ctxCache = new Map<string, { key: unknown; config: string; ctx: ReturnType<typeof makeContext> }>();
 
   async function ctxFor(file: string) {
     const { drawing } = await store.open(file);
+    const cfg = loadConfig(file);
+    const config = JSON.stringify(cfg);
     const hit = ctxCache.get(file);
-    if (hit && hit.key === drawing) return hit.ctx;
-    const ctx = makeContext(path.resolve(file), drawing, loadConfig(file));
-    ctxCache.set(file, { key: drawing, ctx });
+    if (hit && hit.key === drawing && hit.config === config) return hit.ctx;
+    const ctx = makeContext(path.resolve(file), drawing, cfg);
+    ctxCache.set(file, { key: drawing, config, ctx });
     return ctx;
   }
 
@@ -81,6 +84,32 @@ export function startServer(port = 4280, host = "127.0.0.1") {
     const url = new URL(req.url ?? "/", `http://${host}:${port}`);
     try {
       if (url.pathname === "/api/health") return json(res, 200, { ok: true, app: "omakase-cadkit", build: BUILD, pid: process.pid });
+      if (url.pathname === "/api/properties") {
+        const file = fileParam(url);
+        if (!file) return json(res, 400, { error: "file is required" });
+        if (req.method === "POST") {
+          // Only our own browser UI may write local profiles.
+          if (req.headers.origin !== `http://${req.headers.host}` || req.headers["content-type"] !== "application/json")
+            return json(res, 403, { error: "Properties must be saved from this viewer." });
+          let body = "";
+          for await (const chunk of req) {
+            body += chunk;
+            if (body.length > 1024) return json(res, 413, { error: "Properties request too large." });
+          }
+          let units: unknown;
+          try { units = JSON.parse(body).units; } catch { return json(res, 400, { error: "Invalid properties JSON." }); }
+          if (units !== null && !["mm", "cm", "m", "in", "ft"].includes(units as string))
+            return json(res, 400, { error: "Invalid drawing units." });
+          await store.open(file); // Validate the drawing before creating a profile.
+          saveUnits(file, units);
+        } else if (req.method !== "GET") return json(res, 405, { error: "Use GET or POST." });
+        const ctx = await ctxFor(file);
+        return json(res, 200, {
+          units: ctx.sheet.units, override: ctx.cfg.units ?? null,
+          automaticUnits: resolveUnits(ctx.drawing, { ...ctx.cfg, units: undefined }, ctx.sheet.extents),
+          folder: path.dirname(path.resolve(file)),
+        });
+      }
       if (url.pathname === "/api/drawing") {
         const file = fileParam(url);
         if (!file) return json(res, 400, { error: "file is required" });
@@ -153,7 +182,8 @@ export function startServer(port = 4280, host = "127.0.0.1") {
     }
   });
   server.listen(port, host, () => {
-    console.log(`omakase-cadkit viewer on http://${host}:${port}/`);
+    const address = server.address();
+    console.log(`omakase-cadkit viewer on http://${host}:${typeof address === "object" && address ? address.port : port}/`);
   });
   const shutdown = () => {
     store.close();
@@ -165,7 +195,7 @@ export function startServer(port = 4280, host = "127.0.0.1") {
   return server;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const i = process.argv.indexOf("--port");
   startServer(i > 0 ? Number(process.argv[i + 1]) : 4280);
 }

@@ -1,4 +1,4 @@
-// Drawing payload written by the sidecar (schema 3). See sidecar/Program.cs.
+// Drawing payload written by the sidecar (schema 5). See sidecar/Program.cs.
 
 export type Bbox = [number, number, number, number]; // minX, minY, maxX, maxY (world)
 
@@ -67,7 +67,7 @@ export interface Entity {
  * Render primitives. Coordinates are relative to `origin`. Each carries the index of the
  * top-level entity it came from, so block content selects its insert.
  *   ["p", ent, layer, rgb, closed, [x,y,...]]        polyline
- *   ["f", ent, layer, rgb, solid, [[x,y,...], ...]] filled loops (even-odd)
+ *   ["f", ent, layer, rgb, solid, [[x,y,...], ...]] filled geometric loops (even-odd); text-box paths omitted
  *   ["t", ent, layer, rgb, x, y, h, rotRad, align, text]  align = l|c|r + b|m|t
  *   ["d", ent, layer, rgb, x, y]                     point
  *   ["c", ent, layer, rgb, x, y, r]                  circle
@@ -102,7 +102,7 @@ export interface Raster {
 }
 
 export interface Drawing {
-  schema: 3;
+  schema: 5;
   source: { path: string; format: string; bytes: number };
   acadVersion: string;
   header: { insUnits: string; insUnitsCode: number; extMin: [number, number]; extMax: [number, number]; ltScale: number };

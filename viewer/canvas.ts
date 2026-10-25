@@ -2,7 +2,8 @@
 // (the Omakase renderer) unchanged: give it a canvas, a payload, and call draw().
 //
 // Strokes and fills are batched into Path2D objects per (tile, layer, colour) in drawing
-// coordinates, so a frame is a few hundred stroke() calls whatever the entity count. Text is
+// coordinates. Fills stay independent so even-odd holes do not
+// cancel neighboring hatches. Text is
 // drawn per item in screen space, fading out below 3 px and skipped below 1.5 px.
 
 import type { Bbox, Drawing, Finding, Prim, Raster } from "../src/types.ts";
@@ -251,7 +252,8 @@ export class DrawingCanvas {
       const color = cssColor(p[3], this.theme);
       const size = Math.max(b[2] - b[0], b[3] - b[1], 1e-12);
       const maxSize = p[0] === "d" ? Infinity : 2 ** Math.ceil(Math.log2(size));
-      const key = `${p[2]}|${color}|${kind}|${maxSize}`;
+      // Independent fills must not cancel each other through even-odd batching.
+      const key = `${p[2]}|${color}|${kind}|${maxSize}${p[0] === "f" ? `|${i}` : ""}`;
       let batch = batchMaps[t].get(key);
       if (!batch) {
         batch = { layer: p[2], color, kind, maxSize, path: new Path2D(), dots: [] };
@@ -696,23 +698,24 @@ export class DrawingCanvas {
     if (this.selected.size) {
       world();
       const path = new Path2D();
-      const fill = new Path2D();
       for (const e of this.selected)
         for (const i of this.entPrims[e] ?? []) {
           const p = d.prims[i];
           const b = this.primBox.subarray(i * 4, i * 4 + 4);
           if (this.hiddenLayers.has(p[2]) || this.isDefinitionPoint(p) || !onScreen(b)) continue;
           if (Math.max(b[2] - b[0], b[3] - b[1]) * s < 0.375 && p[0] !== "d") continue;
-          if (p[0] === "f") addPrimToPath(fill, p);
-          else if (p[0] !== "t") addPrimToPath(path, p, 0.75 / s);
+          if (p[0] === "f") {
+            const fill = new Path2D();
+            addPrimToPath(fill, p);
+            ctx.globalAlpha = 0.35;
+            ctx.fillStyle = theme.select;
+            ctx.fill(fill, "evenodd");
+            ctx.globalAlpha = 1;
+          } else if (p[0] !== "t") addPrimToPath(path, p, 0.75 / s);
         }
       ctx.strokeStyle = theme.select;
       ctx.lineWidth = 2.5 / s;
       ctx.stroke(path);
-      ctx.globalAlpha = 0.35;
-      ctx.fillStyle = theme.select;
-      ctx.fill(fill, "evenodd");
-      ctx.globalAlpha = 1;
       // a marker so a tiny selection can be found at any zoom
       screen();
       for (const e of this.selected) {

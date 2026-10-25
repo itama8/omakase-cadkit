@@ -55,6 +55,88 @@ let visibleFindings: Finding[] = [];
 let activeIdx = -1;
 let openRequest = 0;
 let lintRequest = 0;
+const properties = $<HTMLDialogElement>("#properties-dialog");
+const propertiesApply = $<HTMLButtonElement>("#properties-apply");
+let propertiesFile: string | null = null;
+let automaticUnit = "";
+let savingProperties = false;
+const unitMm: Record<string, number> = { mm: 1, cm: 10, m: 1000, in: 25.4, ft: 304.8 };
+function previewUnits() {
+  const selected = $<HTMLInputElement>('input[name="units"]:checked')?.value;
+  $("#unit-preview").textContent = selected === "auto"
+    ? `Auto · ${automaticUnit}` : `1 ${selected} = ${fmt(unitMm[selected])} mm`;
+  $("#properties-message").textContent = "";
+}
+async function openProperties() {
+  if (!file || !drawing) return;
+  propertiesFile = file;
+  const requested = file;
+  properties.showModal();
+  propertiesApply.disabled = true;
+  $<HTMLFieldSetElement>(".unit-field").disabled = true;
+  $("#properties-form").setAttribute("aria-busy", "true");
+  $("#properties-message").textContent = "Loading…";
+  $("#properties-message").classList.remove("error");
+  try {
+    const res = await fetch(`/api/properties?file=${encodeURIComponent(requested)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    if (file !== requested || !properties.open) return;
+    automaticUnit = data.automaticUnits.used;
+    const aliases: Record<string, string> = { millimeters: "mm", centimeters: "cm", meters: "m", inches: "in", feet: "ft" };
+    const override = data.override?.toLowerCase();
+    const selected = aliases[override] ?? override ?? "auto";
+    const input = [...document.querySelectorAll<HTMLInputElement>('input[name="units"]')].find((i) => i.value === selected);
+    // Preserve an existing override outside the compact selector (e.g. km) until a choice is made.
+    document.querySelectorAll<HTMLInputElement>('input[name="units"]').forEach((i) => i.checked = i === input);
+    $("#properties-header").textContent = data.units.declared;
+    $("#properties-folder").textContent = data.folder;
+    if (input) previewUnits();
+    else $("#unit-preview").textContent = `Current · ${data.units.used}`;
+    propertiesApply.disabled = !input;
+    $<HTMLFieldSetElement>(".unit-field").disabled = false;
+    $("#properties-message").textContent = "";
+  } catch (err: any) {
+    $("#properties-message").textContent = err.message ?? String(err);
+    $("#properties-message").classList.add("error");
+  } finally { $("#properties-form").removeAttribute("aria-busy"); }
+}
+$("#properties-button").addEventListener("click", () => void openProperties());
+$("#meta").addEventListener("click", (e) => {
+  if ((e.target as HTMLElement).closest(".meta-units")) void openProperties();
+});
+$("#properties-close").addEventListener("click", () => { if (!savingProperties) properties.close(); });
+properties.addEventListener("cancel", (e) => { if (savingProperties) e.preventDefault(); });
+$("#properties-form").addEventListener("change", () => { previewUnits(); propertiesApply.disabled = false; });
+$("#properties-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!propertiesFile || propertiesApply.disabled || savingProperties) return;
+  const target = propertiesFile;
+  const selected = $<HTMLInputElement>('input[name="units"]:checked').value;
+  savingProperties = true;
+  $<HTMLFieldSetElement>(".unit-field").disabled = true;
+  propertiesApply.disabled = true;
+  $("#properties-message").classList.remove("error");
+  $("#properties-message").textContent = "Saving…";
+  try {
+    const res = await fetch(`/api/properties?file=${encodeURIComponent(target)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ units: selected === "auto" ? null : selected }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    if (file === target) await runLint();
+    $("#properties-message").textContent = "Saved";
+    properties.close();
+  } catch (err: any) {
+    $("#properties-message").textContent = err.message ?? String(err);
+    $("#properties-message").classList.add("error");
+  } finally {
+    savingProperties = false;
+    propertiesApply.disabled = false;
+    $<HTMLFieldSetElement>(".unit-field").disabled = false;
+  }
+});
 const previousViews: { cx: number; cy: number; scale: number }[] = [];
 function rememberView() {
   previousViews.push({ cx: view.cx, cy: view.cy, scale: view.scale });
@@ -223,6 +305,8 @@ view.onView = () => {
 // ------------------------------------------------------------------ open
 
 async function open(path: string, opts: { hash?: string } = {}) {
+  properties.close();
+  $<HTMLButtonElement>("#properties-button").disabled = true;
   const request = ++openRequest;
   ++lintRequest;
   packs = null;
@@ -248,6 +332,7 @@ async function open(path: string, opts: { hash?: string } = {}) {
     const loaded = (await res.json()) as Drawing;
     if (request !== openRequest) return;
     drawing = loaded;
+    $<HTMLButtonElement>("#properties-button").disabled = false;
     fileVersion = version;
     homeBox = null;
     byHandle = new Map(drawing.entities.map((e, i) => [e.h, i]));
@@ -335,7 +420,7 @@ function renderMeta() {
   $("#meta").innerHTML =
     `<span class="chip">${esc(d.acadVersion)} ${esc(d.source.format.toUpperCase())}</span>` +
     `<span class="chip">${d.entities.length.toLocaleString()} entities</span>` +
-    `<span class="chip meta-units">units ${esc(d.header.insUnits)}</span>` +
+    `<button class="chip meta-units" title="Drawing properties · file header: ${esc(d.header.insUnits)}" aria-label="Edit drawing units">units ${esc(lint?.sheet?.units.used ?? d.header.insUnits)}</button>` +
     issue;
 }
 
@@ -814,7 +899,7 @@ if (innerWidth <= 860) {
 }
 
 window.addEventListener("keydown", (e) => {
-  if (help.open) return;
+  if (help.open || properties.open) return;
   if ((e.target as HTMLElement).closest("input, textarea, select, [contenteditable=true]")) return;
   if (e.key === "?") { e.preventDefault(); help.showModal(); return; }
   if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); backView(); return; }

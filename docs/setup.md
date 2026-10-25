@@ -4,6 +4,44 @@ This route is for a person or an agent setting up the CLI and viewer from source
 An installable npm library is a [later outcome](outcomes.md); do not use
 `npm install omakase-cadkit` as a substitute for these steps yet.
 
+## Automatic setup
+
+Download the repository ZIP and extract it into a writable folder (or clone it).
+Keep that folder: it contains the app, its tools and the launchers.
+
+| Platform | Setup once | Launch afterward |
+|---|---|---|
+| Windows x64 / ARM64 | Double-click `setup.cmd` | Double-click `launch.cmd` |
+| macOS Intel / Apple Silicon | Run `bash setup.command` from Terminal in the extracted folder | Double-click `launch.command` |
+| Linux x64 / ARM64 | Run `bash setup.command` | Run `bash launch.command` |
+
+On macOS, cloned executable scripts can also be double-clicked. ZIP extraction may
+remove executable permissions; run `chmod +x setup.command launch.command` once
+if Finder will not open them. macOS security policy or managed-machine restrictions
+may also require the organization's normal approval for downloaded scripts.
+
+Setup checks Node 24+, the .NET 8 SDK **and runtime**, and uv. Missing tools are
+downloaded from Node.js, Microsoft and Astral into `.tools/` beside the app. The
+Node archive is checked against Node.js's SHA-256 manifest before extraction.
+It then runs `npm ci` and `npm run setup`, including builds, synthetic fixtures,
+typechecking and tests. uv downloads Python 3.13 for fixture generation as needed.
+Internet access is required; the first setup downloads several hundred MB.
+
+Existing suitable tools are reused. Setup does not request administrator access or
+edit shell profiles or the system PATH. The launcher remembers the tool paths
+in `.tools/environment.json`, opens the empty viewer, and reuses a running server.
+Move the folder or remove a reused system dependency? Run Setup again.
+A failed setup prints the failed step and can be rerun.
+
+To check without installing, run `bash setup.command --check`, or
+`./scripts/bootstrap.ps1 -Check` in Windows PowerShell. To install private copies
+of all tools regardless of system installations, use `--local-tools` or `-LocalTools`.
+
+The bootstrap is verified locally on Linux x64. Windows and macOS CI jobs are
+configured but are not evidence of a successful run until their results are checked.
+Linux still needs the OS libraries required by Node/.NET, plus Bash, curl, tar and
+a SHA-256 utility; this installer does not modify the operating system.
+
 ## Prerequisites
 
 - Node.js 23.6 or newer and npm. Tests and tooling run the TypeScript sources with native
@@ -68,6 +106,11 @@ loopback URL, starts a background server if needed, and opens the URL in your br
 when run from a terminal (`--no-open` to skip; piped output never opens one). If the
 running server came from an older build, `view` replaces it. Paths may start with `~`,
 even inside quotes, which you need for folder names with spaces or `&`.
+After `npm link`, just run `omakase-cadkit` from any folder to launch the app with
+no drawing loaded. Without linking, run `node bin/omakase-cadkit.mjs` from this checkout.
+`view` also accepts no file. Both reuse the background server and open a fresh root URL;
+recent drawings remain available without being loaded automatically. `--help` shows CLI help.
+
 For an explicitly owned foreground server, run `node bin/omakase-cadkit.mjs serve`
 instead and stop it with Ctrl+C. Use `view ... --port 4281` if another service owns
 4280. To use the short command, optionally run `npm link` from the checkout; the

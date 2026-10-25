@@ -932,3 +932,29 @@ dialog::backdrop { background: #000000a6; backdrop-filter: blur(3px); }
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
+
+/* Compact drawing properties */
+#properties-dialog { width: min(410px, calc(100vw - 32px)); }
+#properties-form { padding: 20px; }
+.unit-field { border: 0; padding: 0; margin: 0; min-width: 0; }
+.unit-field legend { font-size: var(--fs-small); color: var(--dim); margin-bottom: 12px; }
+.unit-options { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
+.unit-options label { position: relative; cursor: pointer; }
+.unit-options input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.unit-options span { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 48px; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius); font-family: var(--mono); color: var(--dim); }
+.unit-options svg { width: 14px; height: 14px; }
+.unit-options input:checked + span { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.unit-options input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 3px; }
+.unit-preview { margin: 20px 0; padding: 10px 14px 14px; background: var(--raised); border-radius: var(--radius); text-align: center; color: var(--accent); }
+.unit-preview svg { width: 100%; height: 44px; display: block; }
+.unit-preview output { font-family: var(--mono); font-size: var(--fs-small); }
+.properties-facts { display: flex; justify-content: space-between; color: var(--dim); font-size: var(--fs-small); }
+.properties-scope { margin: 22px 0 6px; font-size: var(--fs-small); }
+.properties-folder { color: var(--dim); font: var(--fs-small) var(--mono); overflow-wrap: anywhere; }
+.properties-note { color: var(--faint); font-size: var(--fs-small); margin: 12px 0; }
+#properties-message { min-height: 18px; color: var(--dim); font-size: var(--fs-small); }
+#properties-message.error { color: var(--error); }
+.properties-footer { display: flex; justify-content: flex-end; margin-top: 12px; }
+#properties-apply { padding: 8px 16px; }
+button.meta-units { cursor: pointer; }
+button.meta-units:hover { color: var(--text); border-color: var(--accent); }

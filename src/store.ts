@@ -9,7 +9,7 @@ import { Sidecar } from "./sidecar.ts";
 import type { Drawing } from "./types.ts";
 
 export const CACHE_DIR = process.env.OMAKASE_CADKIT_CACHE ?? process.env.DRAWKIT_CACHE ?? path.join(process.env.XDG_CACHE_HOME ?? path.join(homedir(), ".cache"), "omakase-cadkit");
-const PAYLOAD_SCHEMA = 3;
+const PAYLOAD_SCHEMA = 5;
 
 function readPayload(file: string): Drawing | null {
   try {

@@ -9,6 +9,7 @@ Writes:
   raster_underlay.dxf  the clean sheet with a linked, clipped raster underlay and the same
                        raster inside a block placed by two inserts
   raster.png        the raster used by raster_underlay.dxf
+  hatch_text.dxf    nested hatch islands, overlapping text exclusions and rotated blocks
 """
 
 import struct
@@ -123,8 +124,42 @@ def write_png(path: Path, size: int = 8):
     path.write_bytes(png)
 
 
+def hatch_text_fixture():
+    """Hatch islands and overlapping text boxes; no private drawing geometry."""
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+    def rect(x, y, w, h):
+        return [(x, y), (x+w, y), (x+w, y+h), (x, y+h)]
+    for variant in range(3):
+        x = variant * 40
+        hatch = msp.add_hatch(color=7)
+        hatch.paths.add_polyline_path(rect(x, 0, 30, 12), is_closed=True, flags=1)
+        if variant < 2:
+            hatch.paths.add_polyline_path(rect(x+1, 1, 28, 10), is_closed=True, flags=16)
+        if variant == 0:
+            hatch.paths.add_polyline_path(rect(x+4, 3, 22, 6), is_closed=True, flags=0)
+        # Text exclusions cross the inner island and overlap each other.
+        hatch.paths.add_polyline_path(rect(x+8, -1, 10, 14), is_closed=True, flags=9)
+        hatch.paths.add_polyline_path(rect(x+14, -1, 8, 14), is_closed=True, flags=8)
+        msp.add_text("I&D", height=3, dxfattribs={"insert": (x+9, 4)})
+        # Geometry beneath a text box must survive (no background overpainting).
+        msp.add_line((x+7, 2), (x+23, 2), dxfattribs={"color": 1})
+    # Two independent hatches overlap: batching must not XOR away their overlap.
+    for x in [0, 8]:
+        hatch = msp.add_hatch(color=3)
+        hatch.paths.add_polyline_path(rect(x, 25, 16, 10), is_closed=True, flags=1)
+    stamp = doc.blocks.new("HATCH_LABEL")
+    hatch = stamp.add_hatch(color=7)
+    hatch.paths.add_polyline_path(rect(0, 0, 30, 12), is_closed=True, flags=1)
+    hatch.paths.add_polyline_path(rect(8, -1, 14, 14), is_closed=True, flags=9)
+    stamp.add_text("I&D", height=3, dxfattribs={"insert": (9, 4)})
+    msp.add_blockref("HATCH_LABEL", (80, 30), dxfattribs={"rotation": 30, "xscale": 1.5, "yscale": 1.5})
+    doc.saveas(OUT / "hatch_text.dxf")
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
+    hatch_text_fixture()
     doc, msp = base()
     network(msp, bad=False)
     doc.saveas(OUT / "sewer_clean.dxf")

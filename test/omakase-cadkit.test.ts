@@ -67,7 +67,7 @@ describe("paths", () => {
 describe("payload", () => {
   test("sidecar reads a DXF into entities and render primitives", async () => {
     const { drawing: d } = await store.open(path.join(FIX, "sewer_clean.dxf"));
-    assert.equal(d.schema, 3);
+    assert.equal(d.schema, 5);
     assert.equal(d.header.insUnits, "Meters");
     const mh = d.entities.filter((e) => e.type === "INSERT" && e.block === "MH");
     assert.equal(mh.length, 5);

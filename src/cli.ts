@@ -17,6 +17,7 @@ import type { Bbox, Finding } from "./types.ts";
 const HELP = `omakase-cadkit — view, inspect and lint DWG/DXF drawings
 
 usage:
+  omakase-cadkit                                    launch the app with no drawing loaded
   omakase-cadkit inspect <file>                       summary: units, sheet, scale, layers, blocks
   omakase-cadkit query <file> [filters]               entities as JSON lines
       --type T  --layer L  --block B  --text REGEX  --handle H  --near x,y,r  --limit N
@@ -26,7 +27,7 @@ usage:
   omakase-cadkit render <file> --out a.svg|a.png [--handle H | --bbox x0,y0,x1,y1 | --finding N]
                 [--width px] [--dark]          draw a region; PNG needs rsvg-convert or magick
   omakase-cadkit convert <in> <out.dwg|out.dxf>       DWG <-> DXF through ACadSharp, with a reread check
-  omakase-cadkit view <file> [--handle H] [--no-open] open in the browser viewer (starts the server;
+  omakase-cadkit view [file] [--handle H] [--no-open] open in the browser viewer (starts the server;
                                                opens a browser when run from a terminal)
   omakase-cadkit serve [--port 4280]                  run the viewer server
   omakase-cadkit rules                                list lint rules
@@ -293,7 +294,7 @@ function openBrowser(url: string) {
   child.unref();
 }
 
-async function cmdView(file: string, flags: Flags) {
+async function cmdView(file: string | undefined, flags: Flags) {
   const port = Number(str(flags, "port") ?? process.env.OMAKASE_CADKIT_PORT ?? process.env.DRAWKIT_PORT ?? 4280);
   let up = await health(port);
   // A server left running from before a rebuild would serve old code and payloads: replace it.
@@ -316,8 +317,8 @@ async function cmdView(file: string, flags: Flags) {
     if (!(await health(port))) throw new Error(`the viewer server did not start on port ${port}; try \`omakase-cadkit serve --port ${port}\` to see why`);
   }
   const url = new URL(`http://127.0.0.1:${port}/`);
-  url.searchParams.set("file", path.resolve(file));
-  const h = str(flags, "handle");
+  if (file) url.searchParams.set("file", path.resolve(file));
+  const h = file ? str(flags, "handle") : undefined;
   const href = url.toString() + (h ? `#h=${h}` : "");
   console.log(href);
   // People at a terminal get a browser; agents and scripts (piped stdout) get just the URL.
@@ -333,9 +334,13 @@ function cmdRules(flags: Flags) {
 export async function main(argv: string[]): Promise<number> {
   const { pos, flags } = parse(argv);
   const [cmd, ...rest] = pos;
-  if (!cmd || flags.help || cmd === "help") {
+  if (flags.help || cmd === "help") {
     process.stdout.write(HELP);
-    return cmd ? 0 : 2;
+    return 0;
+  }
+  if (!cmd) {
+    await cmdView(undefined, flags);
+    return 0;
   }
   if (cmd === "serve") {
     await import("./server.ts").then((m) => m.startServer(Number(str(flags, "port") ?? 4280)));
@@ -346,8 +351,7 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
   if (cmd === "view") {
-    if (!rest[0]) throw new Error("usage: omakase-cadkit view <file>");
-    await cmdView(DrawingStore.resolve(rest[0]), flags);
+    await cmdView(rest[0] ? DrawingStore.resolve(rest[0]) : undefined, flags);
     return 0;
   }
   const store = new DrawingStore();
