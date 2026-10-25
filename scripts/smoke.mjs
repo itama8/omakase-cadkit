@@ -64,7 +64,15 @@ try {
   assert.ok(drawing.entities.length > 0 && drawing.prims.length > 0);
   const lint = await (await get("/api/lint" + query)).json();
   assert.ok(lint.findings.some((f) => f.rule === "sewer-levels"));
-  console.log("Smoke passed: inspect, clean/bad lint exits, SVG export, viewer assets, drawing and lint endpoints.");
+  const rasterFile = path.join(root, "fixtures/raster_underlay.dxf");
+  const rasterQuery = "?file=" + encodeURIComponent(rasterFile);
+  const rasterDrawing = await (await get("/api/drawing" + rasterQuery)).json();
+  const image = rasterDrawing.entities.find((e) => e.type === "IMAGE");
+  assert.ok(image && image.file && image.u && image.v && image.size);
+  const raster = await get("/api/raster" + rasterQuery + "&handle=" + encodeURIComponent(image.h));
+  assert.equal(raster.headers.get("content-type"), "image/png");
+  assert.ok((await raster.arrayBuffer()).byteLength > 8);
+  console.log("Smoke passed: inspect, clean/bad lint exits, SVG export, viewer assets, drawing, lint and raster endpoints.");
 } finally {
   if (child && child.exitCode === null && child.signalCode === null) {
     const exited = once(child, "exit");

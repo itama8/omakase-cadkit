@@ -4,86 +4,229 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>omakase-cadkit</title>
+    <link rel="preload" href="/fonts/ibm-plex-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
+    <svg class="sprite" aria-hidden="true" focusable="false">
+      <symbol id="i-mark" viewBox="0 0 24 24">
+        <path d="M3.5 3.5h17v17h-17z" fill="none" stroke="currentColor" stroke-width="1.4" />
+        <path d="M3.5 9h17M9 9v11.5" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".45" />
+        <circle cx="15.5" cy="15.5" r="2.6" fill="none" stroke="currentColor" stroke-width="1.4" />
+        <path d="M12.9 15.5h-4" stroke="currentColor" stroke-width="1.4" />
+      </symbol>
+      <symbol id="i-panel-left" viewBox="0 0 24 24">
+        <rect x="3.5" y="4.5" width="17" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" />
+        <path d="M9.5 4.5v15" stroke="currentColor" stroke-width="1.5" />
+      </symbol>
+      <symbol id="i-panel-right" viewBox="0 0 24 24">
+        <rect x="3.5" y="4.5" width="17" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" />
+        <path d="M14.5 4.5v15" stroke="currentColor" stroke-width="1.5" />
+      </symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
+      <symbol id="i-fit" viewBox="0 0 24 24">
+        <path d="M9 4H4v5M15 4h5v5M15 20h5v-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></symbol>
+      <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5.5 12h13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></symbol>
+      <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M14 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></symbol>
+      <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M10 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.5" />
+        <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      </symbol>
+      <symbol id="i-help" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.5" />
+        <path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.4c-.7.3-1 .9-1 1.6v.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        <circle cx="12" cy="16.7" r=".9" fill="currentColor" />
+      </symbol>
+      <symbol id="i-search" viewBox="0 0 24 24">
+        <circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="1.6" />
+        <path d="m15 15 4.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+      </symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24">
+        <path d="M3.5 6.5h6l1.8 2h9.2v9.5h-17z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24">
+        <path d="m12 3.8 8 4.4-8 4.4-8-4.4 8-4.4Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+        <path d="m4 12.2 8 4.4 8-4.4M4 16.2l8 4.4 8-4.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24">
+        <path d="M12 4.2 20.5 19h-17L12 4.2Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+        <path d="M12 9.5v4.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        <circle cx="12" cy="16.4" r=".9" fill="currentColor" />
+      </symbol>
+      <symbol id="i-target" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5" />
+        <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+        <path d="M12 3v3M12 18v3M3 12h3M18 12h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      </symbol>
+      <symbol id="i-sheet" viewBox="0 0 24 24">
+        <path d="M5 3.5h9.5L19 8v12.5H5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+        <path d="M14 3.8V8h4.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+        <path d="M8 12.5h8M8 16h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+      </symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24">
+        <path d="M19 12a7 7 0 1 1-2.1-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        <path d="M19.5 4.5v4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </symbol>
+    </svg>
+
     <header id="top">
-      <div class="brand">omakase-cadkit</div>
-      <form id="open-form">
-        <input id="path" type="text" spellcheck="false" placeholder="/path/to/drawing.dwg or .dxf" autocomplete="off" />
-        <button type="submit">Open</button>
+      <a class="brand" href="/" aria-label="omakase-cadkit home">
+        <span class="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-mark" /></svg></span>
+        <span class="brand-text"><span class="brand-name">omakase cadkit</span><span class="brand-sub">drawing review</span></span>
+      </a>
+      <form id="open-form" role="search">
+        <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-target" /></svg>
+        <input id="path" type="text" spellcheck="false" placeholder="Open drawing path — .dwg or .dxf" autocomplete="off" aria-label="Drawing path" />
+        <button type="submit" class="btn-open">Open</button>
       </form>
-      <div id="meta" class="meta"></div>
+      <div class="head-right">
+        <div id="meta" class="meta"></div>
+        <div class="head-actions">
+          <button id="theme-toggle" class="icon-btn" title="Switch between graphite and paper" aria-label="Toggle paper theme" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sun" /></svg>
+          </button>
+          <button id="help-button" class="icon-btn" title="Keyboard and gestures (?)" aria-label="Keyboard help">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-help" /></svg>
+          </button>
+        </div>
+      </div>
     </header>
 
-    <aside id="left">
+    <aside id="left" aria-label="Layers, search and files">
       <nav class="tabs" data-for="left">
         <button data-tab="layers" class="on">Layers</button>
-        <button data-tab="search">Find text</button>
+        <button data-tab="search">Find</button>
         <button data-tab="files">Files</button>
       </nav>
       <section data-pane="layers" class="pane on">
-        <div class="row tools">
-          <input id="layer-filter" type="text" placeholder="Filter layers" />
-          <button id="layers-all" title="Show all layers">All</button>
-          <button id="layers-none" title="Hide all layers">None</button>
+        <div class="pane-head">
+          <span class="micro-label">Layer ledger</span>
+          <span id="layer-summary" class="micro-value"></span>
         </div>
-        <ul id="layers" class="list"></ul>
+        <div class="row tools">
+          <div class="field">
+            <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-layers" /></svg>
+            <input id="layer-filter" type="text" placeholder="Filter layers" aria-label="Filter layers" />
+          </div>
+          <button id="layers-all" class="ghost" title="Show all layers">All</button>
+          <button id="layers-none" class="ghost" title="Hide all layers">None</button>
+        </div>
+        <ul id="layers" class="list layers"></ul>
+        <p class="pane-foot">Alt-click a layer to isolate it.</p>
       </section>
       <section data-pane="search" class="pane">
-        <div class="row tools"><input id="search" type="text" placeholder="Text contains… (regex ok)" /></div>
-        <div id="search-count" class="hint"></div>
-        <ul id="search-results" class="list"></ul>
+        <div class="pane-head"><span class="micro-label">Text search</span><span class="micro-value">regex ok</span></div>
+        <div class="row tools">
+          <div class="field">
+            <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search" /></svg>
+            <input id="search" type="text" placeholder="Text contains…" aria-label="Search text" />
+          </div>
+        </div>
+        <div id="search-count" class="pane-head count-line"></div>
+        <ul id="search-results" class="list search"></ul>
+        <p class="pane-foot"><kbd>/</kbd> focuses search from the drawing.</p>
       </section>
       <section data-pane="files" class="pane">
-        <div class="hint">Recent</div>
-        <ul id="recent" class="list"></ul>
-        <div class="hint" id="dir-label">Browse</div>
-        <ul id="dir" class="list"></ul>
+        <div class="pane-head"><span class="micro-label">Recent</span></div>
+        <ul id="recent" class="list files"></ul>
+        <div class="pane-head"><span class="micro-label">Browse</span><span id="dir-label" class="micro-value"></span></div>
+        <ul id="dir" class="list files"></ul>
       </section>
     </aside>
 
     <main id="stage">
       <canvas id="canvas" tabindex="0" aria-label="Drawing. Drag to pan, wheel to zoom, F to fit, Escape to clear selection."></canvas>
+
       <div id="view-tools" role="toolbar" aria-label="Drawing navigation">
-        <button id="toggle-left" aria-label="Toggle layers and files" aria-expanded="true">Layers / Files</button>
-        <button id="view-back" title="Previous view (Alt + Left)" disabled>Back</button>
-        <button id="fit" title="Fit sheet (F)">Fit</button>
-        <button id="zoom-out" aria-label="Zoom out">−</button>
-        <button id="zoom-in" aria-label="Zoom in">+</button>
-        <button id="toggle-right" aria-label="Toggle review panel" aria-expanded="true">Review</button>
+        <div class="tool-group">
+          <button id="toggle-left" class="icon-btn" aria-label="Toggle layers and files" aria-expanded="true" title="Layers and files">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-panel-left" /></svg>
+          </button>
+          <button id="toggle-right" class="icon-btn" aria-label="Toggle review panel" aria-expanded="true" title="Findings and inspect">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-panel-right" /></svg>
+          </button>
+        </div>
+        <div class="tool-group">
+          <button id="view-back" class="icon-btn" title="Previous view (Alt + Left)" aria-label="Previous view" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-back" /></svg>
+          </button>
+          <button id="fit" class="icon-btn" title="Fit sheet (F)" aria-label="Fit sheet">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-fit" /></svg>
+          </button>
+          <button id="zoom-out" class="icon-btn" aria-label="Zoom out" title="Zoom out">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-minus" /></svg>
+          </button>
+          <button id="zoom-in" class="icon-btn" aria-label="Zoom in" title="Zoom in">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg>
+          </button>
+        </div>
       </div>
-      <div id="navigation-hint">Drag to pan · Wheel to zoom · F to fit</div>
-      <div id="overlay" class="overlay hidden"></div>
+
+      <div id="navigation-hint"><span class="micro-label">Drag</span> pan <span class="sep">·</span> <span class="micro-label">Wheel</span> zoom <span class="sep">·</span> <span class="micro-label">Click</span> inspect</div>
+
+      <div id="finding-nav" class="hidden" role="group" aria-label="Finding navigation">
+        <button id="fnav-prev" class="icon-btn" aria-label="Previous finding"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron-left" /></svg></button>
+        <span class="fnav-read"><span id="fnav-count">0 / 0</span><span class="micro-label">findings</span></span>
+        <button id="fnav-next" class="icon-btn" aria-label="Next finding"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron-right" /></svg></button>
+      </div>
+
+      <div id="overlay" class="overlay hidden" role="status" aria-live="polite"></div>
+
       <div id="empty" class="empty">
-        <h1>Open a DWG or DXF</h1>
-        <p>Paste a path above, pick one under <b>Files</b>, or run <code>omakase-cadkit view &lt;file&gt;</code>.</p>
-        <p class="keys"><kbd>F</kbd> fit · <kbd>wheel</kbd> zoom · <kbd>drag</kbd> pan · <kbd>click</kbd> inspect · <kbd>J</kbd>/<kbd>K</kbd> next/previous finding · <kbd>Esc</kbd> clear</p>
+        <svg class="empty-art" viewBox="0 0 260 150" aria-hidden="true">
+          <rect x="1" y="1" width="258" height="148" rx="6" fill="none" stroke="currentColor" stroke-width="1" opacity=".25" />
+          <rect x="26" y="18" width="208" height="114" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".5" />
+          <path d="M26 48h208M198 48v84" fill="none" stroke="currentColor" stroke-width="1" opacity=".25" />
+          <path d="M64 96h44l20-20h46" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          <circle cx="64" cy="96" r="7" fill="none" stroke="currentColor" stroke-width="1.6" />
+          <circle cx="128" cy="76" r="7" fill="none" stroke="currentColor" stroke-width="1.6" />
+          <circle cx="174" cy="76" r="7" fill="none" stroke="currentColor" stroke-width="1.6" />
+          <path d="M49 96h-14M74 96h14M128 62v-8M128 90v8" stroke="currentColor" stroke-width="1.1" opacity=".5" />
+          <text x="34" y="40" class="empty-art-label">DRAWING 3 / SEWER NETWORK</text>
+          <text x="204" y="126" class="empty-art-label" text-anchor="end">1:500 · A1</text>
+        </svg>
+        <h1>Open a drawing</h1>
+        <p class="empty-lead">Paste a path above, pick a recent file under <b>Files</b>, or run <code>omakase-cadkit view &lt;file&gt;</code>.</p>
+        <div class="empty-keys">
+          <span><kbd>F</kbd> fit sheet</span>
+          <span><kbd>wheel</kbd> zoom</span>
+          <span><kbd>J</kbd><kbd>K</kbd> findings</span>
+          <span><kbd>/</kbd> find text</span>
+          <span><kbd>Esc</kbd> clear</span>
+        </div>
       </div>
     </main>
 
-    <aside id="right">
+    <aside id="right" aria-label="Findings, inspect and sheet">
       <nav class="tabs" data-for="right">
         <button data-tab="findings" class="on">Findings <span id="finding-badge" class="badge"></span></button>
         <button data-tab="inspect">Inspect</button>
         <button data-tab="sheet">Sheet</button>
       </nav>
       <section data-pane="findings" class="pane on">
-        <div class="row tools">
-          <span id="packs"></span>
-          <button id="relint" title="Run lint again">Re-run</button>
+        <div class="review-controls">
+          <div class="row sevs" role="group" aria-label="Severity filter">
+            <label class="sev-chip error"><input type="checkbox" data-sev="error" checked /><span class="dot error"></span>Error <b id="n-error">0</b></label>
+            <label class="sev-chip warning"><input type="checkbox" data-sev="warning" checked /><span class="dot warning"></span>Warn <b id="n-warning">0</b></label>
+            <label class="sev-chip info"><input type="checkbox" data-sev="info" /><span class="dot info"></span>Info <b id="n-info">0</b></label>
+          </div>
+          <div class="row review-secondary">
+            <div id="packs" class="packs"></div>
+            <button id="relint" class="ghost has-icon" title="Run lint again">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-refresh" /></svg>Re-run
+            </button>
+          </div>
+          <label class="switch"><input id="all-markers" type="checkbox" /><span class="switch-track"></span>Show every finding marker on the drawing</label>
+          <div id="profile" class="profile-line"></div>
         </div>
-        <div class="row sevs">
-          <label><input type="checkbox" data-sev="error" checked /> <span class="dot error"></span><span id="n-error">0</span></label>
-          <label><input type="checkbox" data-sev="warning" checked /> <span class="dot warning"></span><span id="n-warning">0</span></label>
-          <label><input type="checkbox" data-sev="info" /> <span class="dot info"></span><span id="n-info">0</span></label>
-        </div>
-        <label class="hint marker-toggle"><input id="all-markers" type="checkbox" /> Show all finding markers</label>
-        <div id="profile" class="hint"></div>
         <ol id="findings" class="list findings"></ol>
       </section>
       <section data-pane="inspect" class="pane">
-        <div id="inspect" class="inspect"><p class="hint">Click an entity on the drawing.</p></div>
+        <div id="inspect" class="inspect"><div class="pane-empty"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-target" /></svg><p>Click an entity on the drawing to inspect its handle, layer and properties.</p></div></div>
       </section>
       <section data-pane="sheet" class="pane">
         <div id="sheet" class="inspect"></div>
@@ -91,10 +234,47 @@
     </aside>
 
     <footer id="status">
-      <span id="coords">—</span>
-      <span id="zoom"></span>
-      <span id="perf"></span>
+      <span class="status-item coords"><span class="micro-label">X</span> <span id="coords">—</span></span>
+      <span class="status-item"><span class="micro-label">1 px</span> <span id="zoom"></span></span>
+      <span class="status-item"><span class="micro-label">Sheet</span> <span id="sheet-scale">—</span></span>
+      <span id="perf" class="status-item"></span>
+      <span class="status-item status-end micro-label">model space</span>
     </footer>
+
+    <dialog id="help-dialog" aria-labelledby="help-title">
+      <div class="dialog-head">
+        <h2 id="help-title">Working the drawing</h2>
+        <button class="icon-btn" id="help-close" aria-label="Close help">✕</button>
+      </div>
+      <div class="help-grid">
+        <div>
+          <h3>Navigate</h3>
+          <dl>
+            <dt><kbd>drag</kbd></dt><dd>Pan with left or middle button</dd>
+            <dt><kbd>wheel</kbd></dt><dd>Zoom at the cursor</dd>
+            <dt><kbd>F</kbd> / <kbd>double-click</kbd></dt><dd>Fit the sheet</dd>
+            <dt><kbd>Alt</kbd> + <kbd>←</kbd></dt><dd>Back to the previous view</dd>
+          </dl>
+        </div>
+        <div>
+          <h3>Review</h3>
+          <dl>
+            <dt><kbd>J</kbd> <kbd>K</kbd></dt><dd>Next and previous finding</dd>
+            <dt><kbd>click</kbd></dt><dd>Inspect an entity</dd>
+            <dt><kbd>/</kbd></dt><dd>Search drawing text</dd>
+            <dt><kbd>Esc</kbd></dt><dd>Clear selection and focus</dd>
+          </dl>
+        </div>
+        <div>
+          <h3>Tips</h3>
+          <dl>
+            <dt><kbd>Alt</kbd> + click layer</dt><dd>Isolate one layer</dd>
+            <dt><kbd>Shift</kbd> + click finding</dt><dd>Keep the view, highlight only</dd>
+          </dl>
+        </div>
+      </div>
+    </dialog>
+
     <script type="module" src="/viewer.js"></script>
   </body>
 </html>

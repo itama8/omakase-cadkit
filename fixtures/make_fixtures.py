@@ -6,9 +6,14 @@ Writes:
   sewer_clean.dxf   a small labelled sewer network on an A1 sheet at 1:500, no defects
   sewer_bad.dxf     the same network with one planted defect per rule (see PLANTED)
   scale_wrong.dxf   the clean sheet with its scale label changed to 1:100
+  raster_underlay.dxf  the clean sheet with a linked, clipped raster underlay and the same
+                       raster inside a block placed by two inserts
+  raster.png        the raster used by raster_underlay.dxf
 """
 
+import struct
 import sys
+import zlib
 from pathlib import Path
 
 import ezdxf
@@ -101,6 +106,23 @@ def network(msp, bad: bool):
         msp.add_text("NOTE: ALL LEVELS IN METRES", height=1.25, dxfattribs={"layer": "NOTES", "insert": (40, 60)})
 
 
+def write_png(path: Path, size: int = 8):
+    rows = []
+    for y in range(size):
+        row = bytearray([0])
+        for x in range(size):
+            row += bytes((255 if (x + y) % 2 else 20, 120, 40))
+        rows.append(bytes(row))
+    def chunk(kind: bytes, data: bytes):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+    png = b"\x89PNG\r\n\x1a\n"
+    png += chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+    png += chunk(b"IDAT", zlib.compress(b"".join(rows)))
+    png += chunk(b"IEND", b"")
+    path.write_bytes(png)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     doc, msp = base()
@@ -112,7 +134,20 @@ def main():
     doc, msp = base("1:100")
     network(msp, bad=False)
     doc.saveas(OUT / "scale_wrong.dxf")
-    print("wrote", ", ".join(p.name for p in sorted(OUT.glob("*.dxf"))))
+    write_png(OUT / "raster.png")
+    doc, msp = base()
+    network(msp, bad=False)
+    image_def = doc.add_image_def(filename="./raster.png", size_in_pixel=(8, 8))
+    image = msp.add_image(image_def, insert=(20, 20), size_in_units=(40, 40), dxfattribs={"layer": "NOTES"})
+    image.set_boundary_path([(2, 2), (6, 6)])
+    # The same raster inside a block, placed plainly and rotated/scaled: images reach the
+    # viewer through inserts too, at the insert's transform.
+    stamp = doc.blocks.new("RASTER_STAMP", base_point=(0, 0))
+    stamp.add_image(image_def, insert=(0, 0), size_in_units=(8, 8))
+    msp.add_blockref("RASTER_STAMP", (100, 20), dxfattribs={"layer": "NOTES"})
+    msp.add_blockref("RASTER_STAMP", (150, 20), dxfattribs={"layer": "NOTES", "rotation": 90, "xscale": 2, "yscale": 2})
+    doc.saveas(OUT / "raster_underlay.dxf")
+    print("wrote", ", ".join(p.name for p in sorted([*OUT.glob("*.dxf"), *OUT.glob("*.png")])))
 
 
 if __name__ == "__main__":

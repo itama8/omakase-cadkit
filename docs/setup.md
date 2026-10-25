@@ -64,7 +64,10 @@ node bin/omakase-cadkit.mjs view fixtures/sewer_bad.dxf
 Expect the clean drawing's lint to exit **0**, and the bad drawing's lint to exit
 **1** with planted findings. Exit **2** means a command failed. Run these separately
 so the expected exit 1 does not prevent the remaining commands. `view` prints a
-loopback URL and starts a background server if needed; open that URL in a browser.
+loopback URL, starts a background server if needed, and opens the URL in your browser
+when run from a terminal (`--no-open` to skip; piped output never opens one). If the
+running server came from an older build, `view` replaces it. Paths may start with `~`,
+even inside quotes, which you need for folder names with spaces or `&`.
 For an explicitly owned foreground server, run `node bin/omakase-cadkit.mjs serve`
 instead and stop it with Ctrl+C. Use `view ... --port 4281` if another service owns
 4280. To use the short command, optionally run `npm link` from the checkout; the
@@ -84,7 +87,8 @@ node scripts/shot.mjs 'http://127.0.0.1:4280/?file=/absolute/path/to/fixtures/se
 | No SDK found | Install the SDK, inspect `dotnet --list-sdks`, or set `DOTNET_ROOT` to its installation directory. `~/.dotnet` is detected automatically. |
 | Sidecar cannot start | Verify the .NET 8 runtime is installed; rebuild with `npm run build:sidecar`. An alternate build directory can be set with `OMAKASE_CADKIT_SIDECAR_DIR`. |
 | Missing drawings in tests | Run `npm run fixtures`; generation needs `uv` and network access the first time. |
-| Viewer looks unchanged | Run `npm run build:viewer`, then refresh. |
+| Viewer looks unchanged | Run `npm run build:viewer`, then refresh. After `npm run build:lib` or a sidecar build, the next `view` restarts the server itself. |
+| `no file at …/~/…` | You are on a build from before `~` expansion; run `npm run build:lib`, or write the path without quotes around the `~` part. |
 | Old payload after sidecar changes | Stop your viewer, clear the payload cache, rebuild, and restart. Cache keys currently exclude the sidecar version. |
 | PNG conversion fails | Write SVG instead, or install `rsvg-convert` or ImageMagick. |
 

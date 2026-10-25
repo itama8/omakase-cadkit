@@ -1,7 +1,27 @@
 // Region -> SVG, for agents and reports: the same primitives the viewer draws.
 
+import { existsSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
 import { intersects } from "./geometry.ts";
 import type { Bbox, Drawing, Finding } from "./types.ts";
+
+const RASTER_TYPES: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
+const RASTER_LIMIT = 6 * 1024 * 1024;
+
+function rasterHref(d: Drawing, ref: string): string | null {
+  const dir = path.dirname(d.source.path);
+  const normalized = ref.replace(/\\/g, "/");
+  const base = path.basename(normalized);
+  for (const candidate of [normalized, path.resolve(dir, normalized), path.join(dir, base)]) {
+    const abs = path.resolve(candidate);
+    const type = RASTER_TYPES[path.extname(abs).toLowerCase()];
+    if (!type || !existsSync(abs)) continue;
+    const stat = statSync(abs);
+    if (!stat.isFile() || stat.size > RASTER_LIMIT) continue;
+    return `data:${type};base64,${readFileSync(abs).toString("base64")}`;
+  }
+  return null;
+}
 
 const hex = (rgb: number, dark: boolean) => {
   // ACI 7 / white and black flip to the ink colour of the background
@@ -35,6 +55,44 @@ export function renderSvg(d: Drawing, o: SvgOptions): string {
   parts.push(`<rect width="100%" height="100%" fill="${bg}"/>`);
   const hl = o.highlight ?? new Set<number>();
   const hidden = o.hiddenLayers ?? new Set<number>();
+  const rasters = new Map<string, string | null>();
+  const skippedRasters = new Set<string>();
+  for (const [ri, e] of (d.rasters ?? []).entries()) {
+    if (hidden.has(e.layer)) continue;
+    if (!rasters.has(e.file)) rasters.set(e.file, rasterHref(d, e.file));
+    const href = rasters.get(e.file);
+    if (!href) {
+      skippedRasters.add(e.file);
+      continue;
+    }
+    const [px, py] = e.size;
+    if (!(px > 0) || !(py > 0)) continue;
+    const [ux, uy] = e.u, [vx, vy] = e.v;
+    const x = e.ins[0] - ox, y = e.ins[1] - oy;
+    const corners = [
+      [x, y],
+      [x + ux * px, y + uy * px],
+      [x + ux * px + vx * py, y + uy * px + vy * py],
+      [x + vx * py, y + vy * py],
+    ];
+    const ix0 = Math.min(...corners.map((c) => c[0])), ix1 = Math.max(...corners.map((c) => c[0]));
+    const iy0 = Math.min(...corners.map((c) => c[1])), iy1 = Math.max(...corners.map((c) => c[1]));
+    if (!intersects(rel, [ix0, iy0, ix1, iy1])) continue;
+    const a = (ux * k).toFixed(4), b = (-uy * k).toFixed(4);
+    const c = (-vx * k).toFixed(4), dd = (vy * k).toFixed(4);
+    const ex = ((x + vx * py - rel[0]) * k).toFixed(2);
+    const ey = ((rel[3] - y - vy * py) * k).toFixed(2);
+    let clipAttr = "";
+    if (e.clip && e.clip.length >= 2) {
+      const p = e.clip.length === 2
+        ? [[e.clip[0][0], e.clip[0][1]], [e.clip[1][0], e.clip[0][1]], [e.clip[1][0], e.clip[1][1]], [e.clip[0][0], e.clip[1][1]]]
+        : e.clip;
+      parts.push(`<clipPath id="raster-${ri}" clipPathUnits="userSpaceOnUse"><polygon points="${p.map(([cx, cy]) => `${cx},${cy}`).join(" ")}"/></clipPath>`);
+      clipAttr = ` clip-path="url(#raster-${ri})"`;
+    }
+    parts.push(`<image x="0" y="0" width="${px}" height="${py}" preserveAspectRatio="none" opacity="${(1 - e.fade / 100).toFixed(2)}" transform="matrix(${a} ${b} ${c} ${dd} ${ex} ${ey})" href="${href}"${clipAttr}/>`);
+  }
+  if (skippedRasters.size) parts.push(`<desc>Rasters not embedded (missing, unsupported, or larger than ${RASTER_LIMIT / 1024 / 1024} MB): ${esc([...skippedRasters].join(", "))}</desc>`);
   for (const p of d.prims) {
     if (hidden.has(p[2])) continue;
     const ent = p[1];

@@ -5,7 +5,7 @@
 // coordinates, so a frame is a few hundred stroke() calls whatever the entity count. Text is
 // drawn per item in screen space and skipped once it is too small to read.
 
-import type { Bbox, Drawing, Finding, Prim } from "../src/types.ts";
+import type { Bbox, Drawing, Finding, Prim, Raster } from "../src/types.ts";
 
 export interface Theme {
   bg: string;
@@ -13,14 +13,25 @@ export interface Theme {
   grid: string;
   select: string;
   sev: Record<"error" | "warning" | "info", string>;
+  /** Light paper background: colours above mid luminance are darkened to stay legible. */
+  light?: boolean;
 }
 
 export const DARK: Theme = {
-  bg: "#15171c",
-  ink: "#e6e6e6",
-  grid: "#22252c",
-  select: "#00e5ff",
-  sev: { error: "#ff453a", warning: "#ffb340", info: "#5ac8fa" },
+  bg: "#0d0e11",
+  ink: "#e8eaf0",
+  grid: "#1b1e24",
+  select: "#5b9dff",
+  sev: { error: "#ff6f6f", warning: "#f0b64b", info: "#67c6e8" },
+};
+
+export const LIGHT: Theme = {
+  bg: "#f7f3ea",
+  ink: "#23201a",
+  grid: "#dcd5c5",
+  select: "#1c5fd6",
+  sev: { error: "#c23a32", warning: "#9a6d12", info: "#216d8c" },
+  light: true,
 };
 
 interface Batch {
@@ -43,6 +54,10 @@ interface RasterTile {
   labels: number;
 }
 
+export interface RasterOverlay extends Raster {
+  bitmap: CanvasImageSource;
+}
+
 const RASTER_SIZE = 256;
 const RASTER_BLEED = 3;
 
@@ -51,8 +66,16 @@ type Rgb = number;
 function cssColor(rgb: Rgb, theme: Theme): string {
   if (rgb === 0xffffff || rgb === 0) return theme.ink;
   const r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
-  // lift colours that would vanish on a dark background
   const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  if (theme.light) {
+    // Darken colours that would wash out on paper; keep hue by scaling all channels.
+    if (lum > 0.5) {
+      const k = 0.5 / lum;
+      return `rgb(${Math.round(r * k)},${Math.round(g * k)},${Math.round(b * k)})`;
+    }
+    return `rgb(${r},${g},${b})`;
+  }
+  // Lift colours that would vanish on a dark background.
   if (lum < 0.18) {
     const k = 0.18 / Math.max(lum, 0.02);
     return `rgb(${Math.min(255, r * k + 40)},${Math.min(255, g * k + 40)},${Math.min(255, b * k + 40)})`;
@@ -89,6 +112,7 @@ export class DrawingCanvas {
   private rasterOriginX = 0;
   private rasterOriginY = 0;
   private drawingVersion = 0;
+  images: RasterOverlay[] = [];
   lastDrawMs = 0;
   lastTextCount = 0;
   viewRevision = 0;
@@ -120,6 +144,7 @@ export class DrawingCanvas {
   setDrawing(d: Drawing) {
     this.drawingVersion++;
     this.drawing = d;
+    this.images = [];
     this.selected.clear();
     this.findings = [];
     this.activeFinding = null;
@@ -136,6 +161,12 @@ export class DrawingCanvas {
     this.buildTiles();
     this.buildHitGrid();
     this.fit();
+  }
+
+  setImages(images: RasterOverlay[]) {
+    this.images = images;
+    this.drawingVersion++;
+    this.request();
   }
 
   private extentsRel(): Bbox {
@@ -438,6 +469,7 @@ export class DrawingCanvas {
     const screen = () => ctx.setTransform(this.dpr, 0, 0, this.dpr, this.dpr * (this.cx * s - this.width / 2 - left + margin), this.dpr * (-this.cy * s - this.height / 2 - top + margin));
 
     world();
+    this.drawImages(ctx, vis);
     ctx.lineJoin = "bevel";
     ctx.lineCap = "butt";
     const visTiles = this.tiles.filter((t) => onScreen(t.bbox));
@@ -492,6 +524,36 @@ export class DrawingCanvas {
       }
     this.drawSelection(ctx, world, screen, onScreen);
     return { canvas, labels: nText };
+  }
+
+  private drawImages(ctx: CanvasRenderingContext2D, vis: number[]) {
+    if (!this.images.length) return;
+    const [ox, oy] = this.drawing!.origin;
+    for (const img of this.images) {
+      if (this.hiddenLayers.has(img.layer)) continue;
+      const [px, py] = img.size;
+      if (!(px > 0) || !(py > 0)) continue;
+      const x = img.ins[0] - ox, y = img.ins[1] - oy;
+      const [ux, uy] = img.u, [vx, vy] = img.v;
+      const wx = [x, x + ux * px, x + ux * px + vx * py, x + vx * py];
+      const wy = [y, y + uy * px, y + uy * px + vy * py, y + vy * py];
+      if (Math.max(...wx) < vis[0] || Math.min(...wx) > vis[2] || Math.max(...wy) < vis[1] || Math.min(...wy) > vis[3]) continue;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, 1 - (img.fade ?? 0) / 100);
+      ctx.transform(ux, uy, -vx, -vy, x + vx * py, y + vy * py);
+      if (img.clip && img.clip.length >= 2) {
+        const c = img.clip.length === 2
+          ? [[img.clip[0][0], img.clip[0][1]], [img.clip[1][0], img.clip[0][1]], [img.clip[1][0], img.clip[1][1]], [img.clip[0][0], img.clip[1][1]]]
+          : img.clip;
+        ctx.beginPath();
+        ctx.moveTo(c[0][0], c[0][1]);
+        for (let i = 1; i < c.length; i++) ctx.lineTo(c[i][0], c[i][1]);
+        ctx.closePath();
+        ctx.clip();
+      }
+      ctx.drawImage(img.bitmap, 0, 0, px, py);
+      ctx.restore();
+    }
   }
 
   private drawSelection(ctx: CanvasRenderingContext2D, world: () => void, screen: () => void, onScreen: (b: ArrayLike<number>) => boolean) {

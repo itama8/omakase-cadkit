@@ -9,7 +9,8 @@ import { createGzip } from "node:zlib";
 import { loadConfig } from "./config.ts";
 import { lintContext, makeContext, RULES } from "./lint/engine.ts";
 import { sewerNetwork } from "./lint/sewer.ts";
-import { CACHE_DIR, DrawingStore } from "./store.ts";
+import { buildStamp } from "./sidecar.ts";
+import { CACHE_DIR, DrawingStore, expandHome } from "./store.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const VIEWER = path.join(ROOT, "viewer");
@@ -39,7 +40,29 @@ function pushRecent(file: string) {
   writeFileSync(RECENT, JSON.stringify(list));
 }
 
-const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".map": "application/json" };
+const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".map": "application/json", ".woff2": "font/woff2" };
+const RASTER_TYPES: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
+const RASTER_LIMIT = 64 * 1024 * 1024;
+
+function resolveRaster(drawing: string, ref: string) {
+  const dir = path.dirname(drawing);
+  const normalized = ref.replace(/\\/g, "/");
+  const base = path.basename(normalized);
+  for (const candidate of [normalized, path.resolve(dir, normalized), path.join(dir, base)]) {
+    const abs = path.resolve(candidate);
+    const type = RASTER_TYPES[path.extname(abs).toLowerCase()];
+    if (!type || !existsSync(abs)) continue;
+    const stat = statSync(abs);
+    if (stat.isFile() && stat.size <= RASTER_LIMIT) return { abs, type, size: stat.size };
+  }
+  return null;
+}
+
+const BUILD = buildStamp();
+const fileParam = (url: URL) => {
+  const f = url.searchParams.get("file");
+  return f ? expandHome(f) : null;
+};
 
 export function startServer(port = 4280, host = "127.0.0.1") {
   const store = new DrawingStore(4);
@@ -57,9 +80,9 @@ export function startServer(port = 4280, host = "127.0.0.1") {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${host}:${port}`);
     try {
-      if (url.pathname === "/api/health") return json(res, 200, { ok: true });
+      if (url.pathname === "/api/health") return json(res, 200, { ok: true, app: "omakase-cadkit", build: BUILD, pid: process.pid });
       if (url.pathname === "/api/drawing") {
-        const file = url.searchParams.get("file");
+        const file = fileParam(url);
         if (!file) return json(res, 400, { error: "file is required" });
         const r = await store.open(file);
         pushRecent(DrawingStore.resolve(file));
@@ -67,8 +90,22 @@ export function startServer(port = 4280, host = "127.0.0.1") {
         createReadStream(r.payloadPath).pipe(createGzip({ level: 4 })).pipe(res);
         return;
       }
+      if (url.pathname === "/api/raster") {
+        const file = fileParam(url);
+        const handle = url.searchParams.get("handle");
+        if (!file || !handle) return json(res, 400, { error: "file and handle are required" });
+        const real = DrawingStore.resolve(file);
+        const { drawing } = await store.open(real);
+        const placed = drawing.rasters.find((r) => r.h.toUpperCase() === handle.toUpperCase());
+        if (!placed) return json(res, 404, { error: "no raster on that entity" });
+        const raster = resolveRaster(real, placed.file);
+        if (!raster) return json(res, 404, { error: `raster ${placed.file} is missing or not a supported image` });
+        res.writeHead(200, { "content-type": raster.type, "content-length": String(raster.size), "cache-control": "no-store" });
+        createReadStream(raster.abs).pipe(res);
+        return;
+      }
       if (url.pathname === "/api/lint") {
-        const file = url.searchParams.get("file");
+        const file = fileParam(url);
         if (!file) return json(res, 400, { error: "file is required" });
         const ctx = await ctxFor(file);
         const packs = url.searchParams.get("packs")?.split(",").filter(Boolean);
@@ -77,7 +114,7 @@ export function startServer(port = 4280, host = "127.0.0.1") {
         return json(res, 200, { ...result, profile: ctx.cfg.source ?? null, availablePacks: [...new Set(RULES.map((r) => r.pack))], rules }, req);
       }
       if (url.pathname === "/api/network") {
-        const file = url.searchParams.get("file");
+        const file = fileParam(url);
         if (!file) return json(res, 400, { error: "file is required" });
         const ctx = await ctxFor(file);
         const n = sewerNetwork(ctx);
@@ -85,7 +122,7 @@ export function startServer(port = 4280, host = "127.0.0.1") {
       }
       if (url.pathname === "/api/recent") return json(res, 200, recent().filter((f) => existsSync(f)));
       if (url.pathname === "/api/files") {
-        const dir = path.resolve(url.searchParams.get("dir") || process.env.HOME || "/");
+        const dir = path.resolve(expandHome(url.searchParams.get("dir") || "~"));
         const entries = readdirSync(dir, { withFileTypes: true })
           .filter((d) => !d.name.startsWith("."))
           .map((d) => {

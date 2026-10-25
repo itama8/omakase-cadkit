@@ -2,7 +2,7 @@
 // a deadline per request, and a fresh process after a crash or timeout.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,27 @@ export function sidecarCommand(): { cmd: string; args: string[]; env: NodeJS.Pro
   if (existsSync(exe)) return { cmd: exe, args: [], env };
   if (existsSync(dll)) return { cmd: path.join(dotnetRoot, "dotnet"), args: [dll], env };
   throw new Error(`omakase-cadkit sidecar is not built: run \`npm run build:sidecar\` (looked in ${dir})`);
+}
+
+/**
+ * Changes whenever the running code would: the newest mtime among this package's modules and
+ * the sidecar build. A long-lived viewer server compares it with a fresh CLI to know it is stale.
+ */
+export function buildStamp(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  let newest = 0;
+  const walk = (dir: string) => {
+    for (const d of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, d.name);
+      if (d.isDirectory()) walk(full);
+      else if (/\.(js|ts)$/.test(d.name)) newest = Math.max(newest, statSync(full).mtimeMs);
+    }
+  };
+  walk(here);
+  const dir = process.env.OMAKASE_CADKIT_SIDECAR_DIR ?? process.env.DRAWKIT_SIDECAR_DIR ?? path.join(ROOT, "bin", "sidecar");
+  const dll = path.join(dir, "omakase-cadkit-sidecar.dll");
+  if (existsSync(dll)) newest = Math.max(newest, statSync(dll).mtimeMs);
+  return String(Math.floor(newest));
 }
 
 interface Pending {

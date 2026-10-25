@@ -2,7 +2,7 @@
 // around the DrawingCanvas renderer.
 
 import type { Drawing, Finding, Severity } from "../src/types.ts";
-import { DrawingCanvas } from "./canvas.ts";
+import { DARK, DrawingCanvas, LIGHT, type RasterOverlay, type Theme } from "./canvas.ts";
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -21,6 +21,29 @@ interface LintPayload {
 }
 
 const view = new DrawingCanvas($<HTMLCanvasElement>("#canvas"));
+
+// ------------------------------------------------------------------ theme, help
+
+const THEME_KEY = "omakase-cadkit-theme";
+function applyTheme(name: "dark" | "light") {
+  document.documentElement.dataset.theme = name;
+  view.theme = (name === "light" ? LIGHT : DARK) as Theme;
+  $("#theme-toggle").setAttribute("aria-pressed", String(name === "light"));
+  view.request();
+}
+const savedTheme = localStorage.getItem(THEME_KEY);
+applyTheme(savedTheme === "light" ? "light" : "dark");
+$("#theme-toggle").addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme(next);
+});
+
+const help = $<HTMLDialogElement>("#help-dialog");
+$("#help-button").addEventListener("click", () => help.showModal());
+$("#help-close").addEventListener("click", () => help.close());
+help.addEventListener("click", (e) => { if (e.target === help) help.close(); });
+
 let file: string | null = null;
 let drawing: Drawing | null = null;
 let byHandle = new Map<string, number>();
@@ -73,7 +96,7 @@ function overlay(msg: string | null, kind: "" | "error" = "") {
 
 view.onView = () => {
   const px = 1 / view.scale;
-  $("#zoom").textContent = `1 px = ${fmt(px, 4)} units`;
+  $("#zoom").textContent = `${fmt(px, 4)} units`;
   $("#perf").textContent = drawing ? `${drawing.entities.length.toLocaleString()} entities · ${view.lastTextCount} labels` : "";
 };
 
@@ -108,6 +131,7 @@ async function open(path: string, opts: { hash?: string } = {}) {
     homeBox = null;
     byHandle = new Map(drawing.entities.map((e, i) => [e.h, i]));
     view.setDrawing(drawing);
+    void loadImages(request, drawing, path);
     initialLayers();
     renderLayers();
     renderMeta();
@@ -126,6 +150,28 @@ async function open(path: string, opts: { hash?: string } = {}) {
   }
 }
 
+async function loadImages(request: number, drawing: Drawing, path: string) {
+  // One fetch per image entity: a block's image placed by many inserts shares the bitmap.
+  const rasters = drawing.rasters ?? [];
+  if (!rasters.length) return;
+  const bitmaps = new Map<string, Promise<ImageBitmap | null>>();
+  for (const r of rasters) {
+    if (bitmaps.has(r.h)) continue;
+    bitmaps.set(
+      r.h,
+      fetch(`/api/raster?file=${encodeURIComponent(path)}&handle=${encodeURIComponent(r.h)}`)
+        .then(async (res) => (res.ok ? createImageBitmap(await res.blob()) : null))
+        .catch(() => null),
+    );
+  }
+  const loaded = await Promise.all(rasters.map(async (r) => {
+    const bitmap = await bitmaps.get(r.h)!;
+    return bitmap ? ({ ...r, bitmap } as RasterOverlay) : null;
+  }));
+  if (request !== openRequest) return;
+  view.setImages(loaded.filter((x): x is RasterOverlay => x !== null));
+}
+
 $("#open-form").addEventListener("submit", (e) => {
   e.preventDefault();
   const p = $<HTMLInputElement>("#path").value.trim();
@@ -135,8 +181,18 @@ $("#open-form").addEventListener("submit", (e) => {
 function renderMeta() {
   if (!drawing) return;
   const d = drawing;
-  const name = d.source.path.split("/").pop();
-  $("#meta").innerHTML = `<b>${esc(name!)}</b> · ${d.acadVersion} ${d.source.format.toUpperCase()} · ${d.entities.length.toLocaleString()} entities · header units ${esc(d.header.insUnits)}`;
+  const name = d.source.path.split("/").pop()!;
+  const errors = lint?.counts.error ?? 0;
+  const warnings = lint?.counts.warning ?? 0;
+  const issue = errors || warnings
+    ? `<span class="chip alert" title="Errors and warnings in this drawing"><strong>${errors}</strong> err <strong>${warnings}</strong> warn</span>`
+    : `<span class="chip" title="No errors or warnings"><strong>clean</strong></span>`;
+  $("#meta").innerHTML =
+    `<span class="chip file-chip" title="${esc(d.source.path)}"><b>${esc(name)}</b></span>` +
+    `<span class="chip">${esc(d.acadVersion)} ${esc(d.source.format.toUpperCase())}</span>` +
+    `<span class="chip">${d.entities.length.toLocaleString()} entities</span>` +
+    `<span class="chip meta-units">units ${esc(d.header.insUnits)}</span>` +
+    issue;
 }
 
 // ------------------------------------------------------------------ layers
@@ -158,10 +214,13 @@ function renderLayers() {
   $("#layers").innerHTML = rows
     .map(
       ({ l, i }) =>
-        `<li data-i="${i}" class="${view.hiddenLayers.has(i) ? "off" : ""}" title="${esc(l.name)}${!l.on ? " (off in file)" : ""}${l.frozen ? " (frozen in file)" : ""}. Alt-click to show only this layer.">` +
+        `<li data-i="${i}" class="layer ${view.hiddenLayers.has(i) ? "off" : ""}" title="${esc(l.name)}${!l.on ? " (off in file)" : ""}${l.frozen ? " (frozen in file)" : ""}. Alt-click to show only this layer.">` +
         `<span class="swatch" style="background:${hexOf(l.color)}"></span><span class="name">${esc(l.name)}</span><span class="count">${l.entities}</span></li>`,
     )
     .join("");
+  const shown = rows.filter(({ i }) => !view.hiddenLayers.has(i));
+  const total = shown.reduce((n, { l }) => n + l.entities, 0);
+  $("#layer-summary").textContent = `${shown.length}/${rows.length} shown · ${total.toLocaleString()} entities`;
 }
 $("#layers").addEventListener("click", (e) => {
   const li = (e.target as HTMLElement).closest("li");
@@ -216,7 +275,7 @@ function runSearch() {
   $("#search-count").textContent = `${hits.length} match${hits.length === 1 ? "" : "es"}${hits.length > 500 ? " (first 500 listed)" : ""}`;
   list.innerHTML = hits
     .slice(0, 500)
-    .map((i) => `<li data-i="${i}" title="${esc(drawing!.entities[i].h)}">${esc(drawing!.entities[i].text!.slice(0, 80))}<span class="count">${esc(drawing!.layers[drawing!.entities[i].layer]?.name ?? "")}</span></li>`)
+    .map((i) => `<li data-i="${i}" title="${esc(drawing!.entities[i].h)}"><span class="search-text">${esc(drawing!.entities[i].text!.slice(0, 80))}</span><span class="tag">${esc(drawing!.layers[drawing!.entities[i].layer]?.name ?? "")}</span></li>`)
     .join("");
 }
 $("#search-results").addEventListener("click", (e) => {
@@ -229,15 +288,15 @@ $("#search-results").addEventListener("click", (e) => {
 
 async function loadRecent() {
   const r: string[] = await fetch("/api/recent").then((r) => r.json());
-  $("#recent").innerHTML = r.map((p) => `<li data-p="${esc(p)}" title="${esc(p)}">${esc(p.split("/").pop()!)}</li>`).join("") || `<li class="hint">none yet</li>`;
+  $("#recent").innerHTML = r.map((p) => `<li data-p="${esc(p)}" title="${esc(p)}"><span class="name">${esc(p.split("/").pop()!)}</span></li>`).join("") || `<li class="hint">No drawings opened yet.</li>`;
 }
 async function browse(dir?: string) {
   const r = await fetch(`/api/files${dir ? "?dir=" + encodeURIComponent(dir) : ""}`).then((r) => r.json());
   if (r.error) return;
   $("#dir-label").textContent = r.dir;
   $("#dir").innerHTML =
-    `<li class="dir" data-d="${esc(r.parent)}">..</li>` +
-    r.entries.map((e: any) => (e.dir ? `<li class="dir" data-d="${esc(e.path)}">${esc(e.name)}</li>` : `<li data-p="${esc(e.path)}">${esc(e.name)}<span class="count">${(e.size / 1e6).toFixed(1)} MB</span></li>`)).join("");
+    `<li class="dir" data-d="${esc(r.parent)}"><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron-left" /></svg><span class="name">..</span></li>` +
+    r.entries.map((e: any) => (e.dir ? `<li class="dir" data-d="${esc(e.path)}"><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder" /></svg><span class="name">${esc(e.name)}</span></li>` : `<li data-p="${esc(e.path)}"><span class="name">${esc(e.name)}</span><span class="size">${(e.size / 1e6).toFixed(1)} MB</span></li>`)).join("");
 }
 for (const id of ["#recent", "#dir"])
   $(id).addEventListener("click", (e) => {
@@ -264,9 +323,12 @@ async function runLint(initialRevision?: number) {
   }
   packs = lint!.packs;
   $("#packs").innerHTML = lint!.availablePacks.map((p) => `<label><input type="checkbox" data-pack="${p}" ${packs!.includes(p) ? "checked" : ""}/> ${p}</label>`).join("");
-  $("#profile").innerHTML = lint!.profile ? `profile <code>${esc(lint!.profile)}</code>` : `no omakase-cadkit.json found; using defaults`;
+  $("#profile").innerHTML = lint!.profile ? `profile <code>${esc(lint!.profile)}</code>` : `no profile · built-in defaults`;
   for (const s of ["error", "warning", "info"] as Severity[]) $(`#n-${s}`).textContent = String(lint!.counts[s]);
+  const measured = lint!.sheet.frames.find((f: any) => f.measured)?.measured;
+  $("#sheet-scale").textContent = measured ? `1:${fmt(measured, 0)}` : "—";
   $("#finding-badge").textContent = lint!.counts.error ? String(lint!.counts.error) : "";
+  renderMeta();
   renderFindings();
   renderSheet();
   // a sheet frame is a better home view than percentile extents
@@ -294,6 +356,14 @@ document.querySelectorAll<HTMLInputElement>(".sevs input").forEach((i) =>
   }),
 );
 
+function updateFindingNav() {
+  const nav = $("#finding-nav");
+  nav.classList.toggle("hidden", visibleFindings.length === 0);
+  $("#fnav-count").textContent = `${activeIdx >= 0 ? activeIdx + 1 : "–"} / ${visibleFindings.length}`;
+  $<HTMLButtonElement>("#fnav-prev").disabled = activeIdx <= 0;
+  $<HTMLButtonElement>("#fnav-next").disabled = activeIdx >= visibleFindings.length - 1;
+}
+
 function renderFindings() {
   if (!lint) return;
   visibleFindings = lint.findings.filter((f) => sevOn[f.severity]);
@@ -304,23 +374,30 @@ function renderFindings() {
   const numbers = new Map(lint.findings.map((f, i) => [f, i + 1]));
   $("#findings").innerHTML =
     visibleFindings
-      .map(
-        (f, i) =>
-          `<li data-i="${i}" title="${esc(title.get(f.rule)?.why ?? "")}"><span class="dot ${f.severity}"></span><span><span class="rule">${esc(f.rule)}</span> <span class="n">#${numbers.get(f)}</span><span class="msg">${esc(f.message)}</span>${
-            f.handles.length > 1 ? `<span class="n">${f.handles.length} entities</span>` : ""
-          }</span></li>`,
-      )
-      .join("") + (lint.ruleErrors.length ? lint.ruleErrors.map((e) => `<li class="hint">rule ${esc(e.rule)} crashed: ${esc(e.error.split("\n")[0])}</li>`).join("") : "");
+      .map((f, i) => {
+        const n = String(numbers.get(f) ?? i + 1).padStart(2, "0");
+        return (
+          `<li data-i="${i}" class="finding sev-${f.severity}" title="${esc(title.get(f.rule)?.why ?? "")}">` +
+          `<span class="finding-num">${n}</span>` +
+          `<div class="finding-main"><div class="finding-top">` +
+          `<span class="sev-word ${f.severity}">${f.severity}</span><span class="rule">${esc(f.rule)}</span>` +
+          (f.handles.length > 1 ? `<span class="finding-meta">${f.handles.length} entities</span>` : "") +
+          `</div><p class="finding-msg">${esc(f.message)}</p></div></li>`
+        );
+      })
+      .join("") +
+    (lint.ruleErrors.length ? lint.ruleErrors.map((e) => `<li class="hint">rule ${esc(e.rule)} crashed: ${esc(e.error.split("\n")[0])}</li>`).join("") : "");
   if (!visibleFindings.length) $("#findings").innerHTML = `<li class="hint">No findings at the selected severities.</li>`;
+  updateFindingNav();
   view.request();
 }
 $("#findings").addEventListener("click", (e) => {
   const li = (e.target as HTMLElement).closest("li");
   if (!li?.dataset.i) return;
-  focusFinding(Number(li.dataset.i));
+  focusFinding(Number(li.dataset.i), { zoom: !(e as MouseEvent).shiftKey });
 });
 
-function focusFinding(i: number) {
+function focusFinding(i: number, opts: { zoom?: boolean } = {}) {
   if (!drawing || i < 0 || i >= visibleFindings.length) return;
   activeIdx = i;
   const f = visibleFindings[i];
@@ -330,7 +407,7 @@ function focusFinding(i: number) {
   const ents = f.handles.map((h) => byHandle.get(h)).filter((x): x is number => x !== undefined);
   select(ents, false, false);
   showTab("right", "findings");
-  if (f.bbox) {
+  if (f.bbox && opts.zoom !== false) {
     const b = f.bbox;
     const w = b[2] - b[0], h = b[3] - b[1];
     const sheetSpan = homeBox ? Math.max(homeBox[2] - homeBox[0], homeBox[3] - homeBox[1]) : 0;
@@ -338,30 +415,52 @@ function focusFinding(i: number) {
     rememberView();
     view.fit([b[0] - m, b[1] - m, b[2] + m, b[3] + m], 0);
   }
+  updateFindingNav();
   const url = new URL(location.href);
   url.hash = `f=${lint!.findings.indexOf(f) + 1}`;
   history.replaceState(null, "", url);
 }
 
+$("#fnav-prev").addEventListener("click", () => focusFinding(Math.max(0, activeIdx - 1)));
+$("#fnav-next").addEventListener("click", () => focusFinding(activeIdx + 1));
+
 function renderSheet() {
   if (!lint) return;
   const s = lint.sheet;
   const u = s.units;
-  const rows = (o: [string, string][]) => `<table>${o.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join("")}</table>`;
-  let html = `<h3>Units</h3>` + rows([["header ($INSUNITS)", esc(u.declared)], ["used", `${esc(u.used)} <span class="hint">(${esc(u.source)})</span>`], ["projected coords", u.looksProjected ? "yes" : "no"]]);
-  if (s.extents) html += rows([["extents", s.extents.map((n: number) => fmt(n, 1)).join(", ")]]);
-  html += `<div class="sub">Frames</div>`;
-  if (!s.frames.length) html += `<p class="hint">No sheet frame with a title block found.</p>`;
-  for (const f of s.frames)
+  const row = ([k, v]: string[]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`;
+  const group = (title: string, body: string) => `<div class="spec-group"><h4>${esc(title)}</h4><table>${body}</table></div>`;
+  let html = group(
+    "Drawing units",
+    [
+      ["header ($INSUNITS)", esc(u.declared)],
+      ["used", `${esc(u.used)} <span class="micro-value">(${esc(u.source)})</span>`],
+      ["projected coords", u.looksProjected ? "yes" : "no"],
+      ...(s.extents ? [["extents", s.extents.map((n: number) => fmt(n, 1)).join(", ")]] : []),
+    ]
+      .map(row)
+      .join(""),
+  );
+  if (!s.frames.length) {
+    html += `<div class="spec-group"><h4>Sheet frames</h4><table><tr><td>frame</td><td>none with a title block</td></tr></table></div>`;
+  }
+  s.frames.forEach((f: any, i: number) => {
     html +=
-      rows([
-        ["handle", `<a href="#" data-h="${f.handle}">${f.handle}</a>`],
-        ["drawing number", esc(f.drawingNumber?.text ?? "—")],
-        ["paper", `${f.paper}${f.isoRatio ? "" : " (fitted; frame is not an ISO ratio)"}`],
-        ["measured scale", f.measured ? `1:${fmt(f.measured, 0)}` : "—"],
-        ["declared scale", f.declared ? (f.declared.ratios.map((r: number) => "1:" + fmt(r, 0)).join(", ") || (f.declared.nts ? "NTS" : "label without ratio")) : "none"],
-        ["frame size", `${fmt(f.widthMm / 1000, 2)} × ${fmt(f.heightMm / 1000, 2)} m`],
-      ]) + "<br/>";
+      `<div class="frame-head"><span class="frame-idx">F${String(i + 1).padStart(2, "0")}</span><span class="micro-label">sheet frame</span></div>` +
+      group(
+        f.paper + (f.isoRatio ? "" : " · fitted"),
+        [
+          ["handle", `<a href="#" data-h="${f.handle}">${f.handle}</a>`],
+          ["drawing number", esc(f.drawingNumber?.text ?? "—")],
+          ["paper", `${f.paper}${f.isoRatio ? "" : " (frame is not an ISO ratio)"}`],
+          ["measured scale", f.measured ? `1:${fmt(f.measured, 0)}` : "—"],
+          ["declared scale", f.declared ? f.declared.ratios.map((r: number) => "1:" + fmt(r, 0)).join(", ") || (f.declared.nts ? "NTS" : "label without ratio") : "none"],
+          ["frame size", `${fmt(f.widthMm / 1000, 2)} × ${fmt(f.heightMm / 1000, 2)} m`],
+        ]
+          .map(row)
+          .join(""),
+      );
+  });
   $("#sheet").innerHTML = html;
 }
 $("#sheet").addEventListener("click", (e) => {
@@ -411,10 +510,14 @@ function inspect(i: number) {
   if (e.pts) rows.push(["points", e.pts.map((n) => fmt(n)).join(", ")]);
   const related = lint?.findings.filter((f) => f.handles.includes(e.h)) ?? [];
   $("#inspect").innerHTML =
-    `<h3>${esc(e.type)} ${esc(e.h)}</h3>` +
-    `<div class="actions"><button data-act="copy-h">Copy handle</button><button data-act="copy-link">Copy link</button><button data-act="zoom">Zoom to</button></div>` +
+    `<h3>${esc(e.type)} <span class="handle">${esc(e.h)}</span></h3>` +
+    `<div class="actions"><button data-act="copy-h">Copy handle</button><button data-act="copy-link">Copy link</button><button data-act="zoom">Zoom to entity</button></div>` +
     `<table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join("")}</table>` +
-    (related.length ? `<div class="sub">Findings</div><ol class="list findings">${related.map((f) => `<li><span class="dot ${f.severity}"></span><span><span class="rule">${esc(f.rule)}</span><span class="msg">${esc(f.message)}</span></span></li>`).join("")}</ol>` : "");
+    (related.length
+      ? `<div class="sub">Findings on this entity</div><ol class="list findings">${related
+          .map((f) => `<li class="finding sev-${f.severity}"><span class="finding-num">${String(lint!.findings.indexOf(f) + 1).padStart(2, "0")}</span><div class="finding-main"><div class="finding-top"><span class="sev-word ${f.severity}">${f.severity}</span><span class="rule">${esc(f.rule)}</span></div><p class="finding-msg">${esc(f.message)}</p></div></li>`)
+          .join("")}</ol>`
+      : "");
   ($("#inspect") as any)._ent = i;
   showTab("right", "inspect");
   const url = new URL(location.href);
@@ -542,14 +645,16 @@ for (const side of ["left", "right"] as const) {
     button.setAttribute("aria-expanded", String(!hidden));
   });
 }
-if (innerWidth <= 820) {
+if (innerWidth <= 860) {
   document.body.classList.add("left-hidden", "right-hidden");
   $("#toggle-left").setAttribute("aria-expanded", "false");
   $("#toggle-right").setAttribute("aria-expanded", "false");
 }
 
 window.addEventListener("keydown", (e) => {
+  if (help.open) return;
   if ((e.target as HTMLElement).closest("input, textarea, select, [contenteditable=true]")) return;
+  if (e.key === "?") { e.preventDefault(); help.showModal(); return; }
   if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); backView(); return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === "f" || e.key === "F") home();

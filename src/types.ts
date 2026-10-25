@@ -1,4 +1,4 @@
-// Drawing payload written by the sidecar (schema 1). See sidecar/Program.cs.
+// Drawing payload written by the sidecar (schema 3). See sidecar/Program.cs.
 
 export type Bbox = [number, number, number, number]; // minX, minY, maxX, maxY (world)
 
@@ -49,6 +49,16 @@ export interface Entity {
   pattern?: string;
   solid?: boolean;
   file?: string;
+  /** IMAGE: per-pixel U and V vectors in world units. */
+  u?: [number, number];
+  v?: [number, number];
+  /** IMAGE: size in pixels. */
+  size?: [number, number];
+  /** IMAGE: display flag and fade (0-100). */
+  show?: boolean;
+  fade?: number;
+  /** IMAGE: clip boundary in image pixel coordinates, when clipping is on. */
+  clip?: [number, number][];
   measurement?: number;
   propError?: string;
 }
@@ -71,8 +81,28 @@ export type Prim =
   | ["c", number, number, number, number, number, number]
   | ["a", number, number, number, number, number, number, number, number];
 
+/** One drawn IMAGE in world space: a top-level image or one placed by an INSERT. */
+export interface Raster {
+  /** Index of the top-level entity that draws it (the image itself or its insert). */
+  ent: number;
+  /** Handle of the IMAGE entity. */
+  h: string;
+  layer: number;
+  /** Image reference as stored in the drawing. */
+  file: string;
+  /** World position of pixel corner (0, 0), and world vectors per pixel. */
+  ins: [number, number];
+  u: [number, number];
+  v: [number, number];
+  /** Size in pixels. */
+  size: [number, number];
+  fade: number;
+  /** Clip boundary in image pixel coordinates, when clipping is on. */
+  clip?: [number, number][];
+}
+
 export interface Drawing {
-  schema: 1;
+  schema: 3;
   source: { path: string; format: string; bytes: number };
   acadVersion: string;
   header: { insUnits: string; insUnitsCode: number; extMin: [number, number]; extMax: [number, number]; ltScale: number };
@@ -81,6 +111,8 @@ export interface Drawing {
   layouts: { name: string; entities: number }[];
   origin: [number, number];
   prims: Prim[];
+  /** Images to draw beneath the primitives, in draw order. */
+  rasters: Raster[];
   entities: Entity[];
   unrendered: Record<string, number>;
   notes: Record<string, number>;

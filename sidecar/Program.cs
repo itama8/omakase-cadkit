@@ -199,6 +199,8 @@ sealed class Payload
 	readonly Dictionary<string, int> _unrendered = new();
 	readonly Stats _stats = new();
 	readonly List<string> _emitErrorSamples = new();
+	// IMAGE placements in world space, top level and inside blocks, in draw order
+	readonly List<(int ent, string h, int layer, string file, double[] ins, double[] u, double[] v, double[] size, double fade, List<XY> clip)> _rasters = new();
 
 	// state for the top-level entity being emitted
 	int _ent;
@@ -244,7 +246,7 @@ sealed class Payload
 		var w = _w;
 		var h = _doc.Header;
 		w.WriteStartObject();
-		w.WriteNumber("schema", 1);
+		w.WriteNumber("schema", 3);
 		w.WriteStartObject("source");
 		w.WriteString("path", path);
 		w.WriteString("format", Path.GetExtension(path).TrimStart('.').ToLowerInvariant());
@@ -340,6 +342,29 @@ sealed class Payload
 				if (_emitErrorSamples.Count < 10) _emitErrorSamples.Add(e.ObjectName + " " + e.Handle.ToString("X") + ": " + ex.Message);
 			}
 			if (_minX <= _maxX) bboxes[i] = new[] { _minX, _minY, _maxX, _maxY };
+		}
+		w.WriteEndArray();
+
+		w.WriteStartArray("rasters");
+		foreach (var r in _rasters)
+		{
+			w.WriteStartObject();
+			w.WriteNumber("ent", r.ent);
+			w.WriteString("h", r.h);
+			w.WriteNumber("layer", r.layer);
+			w.WriteString("file", r.file);
+			Arr("ins", r.ins);
+			Arr("u", r.u);
+			Arr("v", r.v);
+			Arr("size", r.size);
+			w.WriteNumber("fade", R(r.fade));
+			if (r.clip != null)
+			{
+				w.WriteStartArray("clip");
+				foreach (var cp in r.clip) { w.WriteStartArray(); w.WriteNumberValue(R(cp.X)); w.WriteNumberValue(R(cp.Y)); w.WriteEndArray(); }
+				w.WriteEndArray();
+			}
+			w.WriteEndObject();
 		}
 		w.WriteEndArray();
 
@@ -475,6 +500,23 @@ sealed class Payload
 				case RasterImage img:
 					w.WriteString("file", img.Definition?.FileName ?? "");
 					Arr("ins", img.InsertPoint.X, img.InsertPoint.Y);
+					Arr("size", img.Size.X, img.Size.Y);
+					Arr("u", img.UVector.X, img.UVector.Y);
+					Arr("v", img.VVector.X, img.VVector.Y);
+					w.WriteBoolean("show", img.ShowImage);
+					w.WriteNumber("fade", R(img.Fade));
+					if (img.ClippingState && img.ClipBoundaryVertices != null && img.ClipBoundaryVertices.Count > 0)
+					{
+						w.WriteStartArray("clip");
+						foreach (var cp in img.ClipBoundaryVertices)
+						{
+							w.WriteStartArray();
+							w.WriteNumberValue(R(cp.X));
+							w.WriteNumberValue(R(cp.Y));
+							w.WriteEndArray();
+						}
+						w.WriteEndArray();
+					}
 					break;
 				case Dimension d:
 					w.WriteString("text", d.Text ?? "");
@@ -806,6 +848,15 @@ sealed class Payload
 					var u = img.UVector * img.Size.X;
 					var v = img.VVector * img.Size.Y;
 					PrimPolyline(layer, rgb, true, new() { (o.X, o.Y), (o.X + u.X, o.Y + u.Y), (o.X + u.X + v.X, o.Y + u.Y + v.Y), (o.X + v.X, o.Y + v.Y) }, t);
+					var file = img.Definition?.FileName;
+					if (img.ShowImage && !string.IsNullOrEmpty(file) && img.Size.X > 0 && img.Size.Y > 0)
+					{
+						var (wx, wy) = t.Apply(o.X, o.Y);
+						var (ux, uy) = t.ApplyVec(img.UVector.X, img.UVector.Y);
+						var (vx, vy) = t.ApplyVec(img.VVector.X, img.VVector.Y);
+						var clip = img.ClippingState && img.ClipBoundaryVertices?.Count >= 2 ? img.ClipBoundaryVertices.ToList() : null;
+						_rasters.Add((_ent, img.Handle.ToString("X"), layer, file, new[] { wx, wy }, new[] { ux, uy }, new[] { vx, vy }, new[] { img.Size.X, img.Size.Y }, img.Fade, clip));
+					}
 					break;
 				}
 			case Ole2Frame ole:

@@ -4,14 +4,14 @@
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { findConfig, loadConfig } from "../src/config.ts";
 import { lintContext, lintSet, makeContext } from "../src/lint/engine.ts";
 import { sewerNetwork } from "../src/lint/sewer.ts";
 import { renderSvg } from "../src/render-svg.ts";
-import { DrawingStore } from "../src/store.ts";
+import { DrawingStore, expandHome } from "../src/store.ts";
 import type { Finding } from "../src/types.ts";
 
 const FIX = path.resolve(import.meta.dirname, "../fixtures");
@@ -26,7 +26,7 @@ async function lintFile(file: string, packs?: string[]) {
 const rules = (fs: Finding[], sev?: string) => fs.filter((f) => !sev || f.severity === sev).map((f) => f.rule).sort();
 
 before(() => {
-  for (const f of ["sewer_clean.dxf", "sewer_bad.dxf", "scale_wrong.dxf"])
+  for (const f of ["sewer_clean.dxf", "sewer_bad.dxf", "scale_wrong.dxf", "raster_underlay.dxf", "raster.png"])
     if (!existsSync(path.join(FIX, f))) throw new Error(`missing fixture ${f}: run \`npm run fixtures\``);
 });
 
@@ -55,10 +55,19 @@ describe("profile filenames", () => {
   });
 });
 
+describe("paths", () => {
+  test("a quoted ~ path means the home directory, as in a shell", () => {
+    assert.equal(expandHome("~/Work/a b.dwg"), path.join(homedir(), "Work/a b.dwg"));
+    assert.equal(expandHome("~"), homedir());
+    assert.equal(expandHome("plans/~draft.dwg"), "plans/~draft.dwg");
+    assert.equal(expandHome("~other/x.dwg"), "~other/x.dwg");
+  });
+});
+
 describe("payload", () => {
   test("sidecar reads a DXF into entities and render primitives", async () => {
     const { drawing: d } = await store.open(path.join(FIX, "sewer_clean.dxf"));
-    assert.equal(d.schema, 1);
+    assert.equal(d.schema, 3);
     assert.equal(d.header.insUnits, "Meters");
     const mh = d.entities.filter((e) => e.type === "INSERT" && e.block === "MH");
     assert.equal(mh.length, 5);
@@ -76,6 +85,36 @@ describe("payload", () => {
     assert.ok(t);
     assert.equal(t!.height, 1);
     assert.deepEqual(t!.ins, [102, 156]);
+  });
+
+  test("raster images carry their world transform, display flags and clip window", async () => {
+    const { drawing: d } = await store.open(path.join(FIX, "raster_underlay.dxf"));
+    const image = d.entities.find((e) => e.type === "IMAGE");
+    assert.ok(image);
+    assert.equal(image!.file, "./raster.png");
+    assert.deepEqual(image!.ins, [20, 20]);
+    assert.deepEqual(image!.size, [8, 8]);
+    assert.deepEqual(image!.u, [5, 0]);
+    assert.deepEqual(image!.v, [0, 5]);
+    assert.equal(image!.show, true);
+    assert.equal(image!.fade, 0);
+    assert.deepEqual(image!.clip, [[2, 2], [6, 6]]);
+    const top = d.rasters.find((r) => r.h === image!.h)!;
+    assert.deepEqual([top.ins, top.u, top.v, top.clip], [[20, 20], [5, 0], [0, 5], [[2, 2], [6, 6]]]);
+  });
+
+  test("images inside blocks are placed at each insert's transform", async () => {
+    const { drawing: d } = await store.open(path.join(FIX, "raster_underlay.dxf"));
+    const inserts = d.entities.map((e, i) => ({ e, i })).filter(({ e }) => e.type === "INSERT" && e.block === "RASTER_STAMP");
+    assert.equal(inserts.length, 2);
+    const placed = d.rasters.filter((r) => r.ent !== d.entities.findIndex((e) => e.type === "IMAGE"));
+    assert.equal(placed.length, 2);
+    assert.equal(placed[0].h, placed[1].h, "both placements are the one IMAGE in the block");
+    assert.deepEqual(placed.map((r) => r.ent), inserts.map(({ i }) => i));
+    const notes = d.layers.findIndex((l) => l.name === "NOTES");
+    assert.ok(placed.every((r) => r.layer === notes), "layer 0 content takes the insert's layer");
+    assert.deepEqual([placed[0].ins, placed[0].u, placed[0].v], [[100, 20], [1, 0], [0, 1]]);
+    assert.deepEqual([placed[1].ins, placed[1].u, placed[1].v], [[150, 20], [0, 2], [-2, 0]]);
   });
 });
 
@@ -166,6 +205,15 @@ describe("render", () => {
     assert.match(svg, /^<svg/);
     assert.match(svg, />MH- 2</);
     assert.match(svg, /#ff3b30/);
+  });
+
+  test("SVG embeds a linked raster with its world transform and clip window", async () => {
+    const { drawing: d } = await store.open(path.join(FIX, "raster_underlay.dxf"));
+    const svg = renderSvg(d, { bbox: [15, 15, 65, 65], width: 400 });
+    assert.match(svg, /<image[^>]+href="data:image\/png;base64,/);
+    assert.match(svg, /transform="matrix\(40\.0000 0\.0000 0\.0000 40\.0000 40\.00 40\.00\)"/);
+    assert.match(svg, /clip-path="url\(#raster-0\)"/);
+    assert.match(svg, /<polygon points="2,2 6,2 6,6 2,6"\/>/);
   });
 });
 

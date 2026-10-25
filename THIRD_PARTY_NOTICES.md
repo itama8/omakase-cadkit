@@ -13,6 +13,15 @@ Provenance: the NuGet 3.8.0 package identifies source commit
 Copyright (c) 2026 Albert Domenech; the license file at that commit lists
 Copyright (c) 2021 Albert Domenech. The upstream text is retained unchanged.
 
+## IBM Plex Sans and IBM Plex Mono
+
+The viewer bundles latin subsets of the IBM Plex typefaces as WOFF2 under
+`viewer/fonts/`, from `@fontsource-variable/ibm-plex-sans` 5.3.0 and
+`@fontsource/ibm-plex-mono` 5.2.5. Copyright © 2017 IBM Corp. with Reserved Font
+Name "Plex", licensed under SIL OFL 1.1. The upstream license is preserved in
+[licenses/IBMPlex-OFL.txt](licenses/IBMPlex-OFL.txt). No font file has been
+modified; only the latin subset files are redistributed.
+
 ## Toolchains and future distributions
 
 Node.js, .NET, uv, Python, ezdxf, TypeScript, esbuild, and optional renderers are

@@ -9,6 +9,7 @@
   const originalDrawing = v.drawing;
   const originalFindings = v.findings;
   const originalLayers = v.hiddenLayers;
+  const originalImages = v.images;
   try {
     v.hiddenLayers = new Set();
     v.setDrawing({ ...originalDrawing, origin: [0, 0], prims: [['c', 0, 0, 0xffffff, 0, 0, .001]], entities: [{ h: 'TEST', type: 'CIRCLE', layer: 0, color: 0xffffff, bbox: [-.001, -.001, .001, .001] }] });
@@ -35,6 +36,18 @@
       assert(ink > 0 && ink <= Math.ceil(4 * devicePixelRatio) ** 2, 'ordinary points must remain small at every scale');
       assert(v.pick(v.width / 2, v.height / 2) === 0, 'ordinary points must remain inspectable');
     }
+    // A linked raster draws beneath geometry at its world transform.
+    const bitmap = document.createElement('canvas');
+    bitmap.width = bitmap.height = 2;
+    const bctx = bitmap.getContext('2d');
+    bctx.fillStyle = '#ff0000';
+    bctx.fillRect(0, 0, 2, 2);
+    v.setDrawing({ ...originalDrawing, origin: [0, 0], layers: [{ name: '0' }], prims: [], entities: [{ h: 'IMG', type: 'IMAGE', layer: 0, color: 0xffffff, bbox: [0, 0, 2, 2] }] });
+    v.setImages([{ ent: 0, h: 'IMG', layer: 0, file: 'x', ins: [0, 0], u: [1, 0], v: [0, 1], size: [2, 2], fade: 0, bitmap }]);
+    v.cx = v.cy = 1; v.scale = 100; v.draw();
+    ctx.drawImage(v.canvas, 0, 0);
+    const middle = ctx.getImageData(Math.floor(v.canvas.width / 2), Math.floor(v.canvas.height / 2), 1, 1).data;
+    assert(middle[0] > 200 && middle[1] < 40 && middle[2] < 40, 'raster images must draw at their world transform');
     // Crossing tile boundaries and reusing old tiles must preserve geometry and text.
     v.setDrawing({ ...originalDrawing, origin: [0, 0], entities: [{ h: 'TEST', type: 'LINE', layer: 0, color: 0xffffff }], prims: [
       ['p', 0, 0, 0xff0000, 0, [-2000, 0, 2000, 0]],
@@ -52,7 +65,7 @@
     for (let i = 0; i < fresh.length; i++) maxDelta = Math.max(maxDelta, Math.abs(fresh[i] - cached[i]));
     assert(maxDelta <= 1, 'cached tile pixels must match a fresh render after a diagonal pan');
   } finally {
-    v.setDrawing(originalDrawing); v.findings = originalFindings; v.hiddenLayers = originalLayers;
+    v.setDrawing(originalDrawing); v.setImages(originalImages); v.findings = originalFindings; v.hiddenLayers = originalLayers;
   }
   document.querySelector('#fit').click();
   await wait(100);

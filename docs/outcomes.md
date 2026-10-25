@@ -42,4 +42,4 @@ Borrowed from Omakase: read current state before deeper history, separate accept
 from implementation, choose a runnable next action, and keep evidence in devlogs.
 This repository has no dependency on Omakase's skills, plans, or tooling.
 
-Latest evidence: [2026-10-25-s05](../.devlog/2026-10-25-s05.md).
+Latest evidence: [2026-10-25-s07](../.devlog/2026-10-25-s07.md).

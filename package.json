@@ -52,6 +52,7 @@
     "sidecar/OmakaseCadkitSidecar.csproj",
     "viewer/index.html",
     "viewer/style.css",
+    "viewer/fonts/",
     "viewer/dist/",
     "fixtures/make_fixtures.py",
     "fixtures/omakase-cadkit.json",

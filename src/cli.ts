@@ -10,7 +10,8 @@ import { entityMatcher, type EntityFilter } from "./query.ts";
 import { sewerNetwork } from "./lint/sewer.ts";
 import { renderSvg } from "./render-svg.ts";
 import { workingScale } from "./sheet.ts";
-import { DrawingStore } from "./store.ts";
+import { buildStamp } from "./sidecar.ts";
+import { DrawingStore, expandHome } from "./store.ts";
 import type { Bbox, Finding } from "./types.ts";
 
 const HELP = `omakase-cadkit — view, inspect and lint DWG/DXF drawings
@@ -25,7 +26,8 @@ usage:
   omakase-cadkit render <file> --out a.svg|a.png [--handle H | --bbox x0,y0,x1,y1 | --finding N]
                 [--width px] [--dark]          draw a region; PNG needs rsvg-convert or magick
   omakase-cadkit convert <in> <out.dwg|out.dxf>       DWG <-> DXF through ACadSharp, with a reread check
-  omakase-cadkit view <file> [--handle H]             open in the browser viewer (starts the server)
+  omakase-cadkit view <file> [--handle H] [--no-open] open in the browser viewer (starts the server;
+                                               opens a browser when run from a terminal)
   omakase-cadkit serve [--port 4280]                  run the viewer server
   omakase-cadkit rules                                list lint rules
 
@@ -44,11 +46,11 @@ function parse(argv: string[]): { pos: string[]; flags: Flags } {
     if (a.startsWith("--")) {
       const k = a.slice(2);
       const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith("--") && !["json", "csv", "dark", "help"].includes(k)) {
-        flags[k] = next;
+      if (next !== undefined && !next.startsWith("--") && !["json", "csv", "dark", "help", "open", "no-open"].includes(k)) {
+        flags[k] = expandHome(next);
         i++;
       } else flags[k] = true;
-    } else pos.push(a);
+    } else pos.push(expandHome(a));
   }
   return { pos, flags };
 }
@@ -267,28 +269,59 @@ async function cmdRender(store: DrawingStore, file: string, flags: Flags) {
   }
 }
 
-async function serverUp(port: number): Promise<boolean> {
+interface Health {
+  ok: boolean;
+  app?: string;
+  build?: string;
+  pid?: number;
+}
+
+async function health(port: number): Promise<Health | null> {
   try {
     const r = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(500) });
-    return r.ok;
+    return r.ok ? ((await r.json()) as Health) : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function openBrowser(url: string) {
+  const [cmd, args] =
+    process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]];
+  const child = spawn(cmd, args as string[], { detached: true, stdio: "ignore" });
+  child.on("error", () => process.stderr.write(`could not start a browser (${cmd}); open the URL above\n`));
+  child.unref();
 }
 
 async function cmdView(file: string, flags: Flags) {
   const port = Number(str(flags, "port") ?? process.env.OMAKASE_CADKIT_PORT ?? process.env.DRAWKIT_PORT ?? 4280);
-  if (!(await serverUp(port))) {
+  let up = await health(port);
+  // A server left running from before a rebuild would serve old code and payloads: replace it.
+  if (up?.app === "omakase-cadkit" && up.pid && up.build !== buildStamp()) {
+    process.stderr.write(`restarting the viewer server on port ${port}: it was started from an older build\n`);
+    try {
+      process.kill(up.pid, "SIGTERM");
+    } catch {}
+    for (let i = 0; i < 50 && (await health(port)); i++) await new Promise((r) => setTimeout(r, 100));
+    up = null;
+  } else if (up && !up.build) {
+    process.stderr.write(`the viewer server on port ${port} predates build checks and may run old code; stop it (pkill -f omakase-cadkit/dist/server) and run view again\n`);
+  }
+  if (!up) {
     const server = ["server.js", "server.ts"].map((f) => path.join(import.meta.dirname, f)).find((f) => existsSync(f));
     if (!server) throw new Error("viewer server entry not found: run `npm run build`");
     const child = spawn(process.execPath, [server, "--port", String(port)], { detached: true, stdio: "ignore" });
     child.unref();
-    for (let i = 0; i < 50 && !(await serverUp(port)); i++) await new Promise((r) => setTimeout(r, 100));
+    for (let i = 0; i < 50 && !(await health(port)); i++) await new Promise((r) => setTimeout(r, 100));
+    if (!(await health(port))) throw new Error(`the viewer server did not start on port ${port}; try \`omakase-cadkit serve --port ${port}\` to see why`);
   }
   const url = new URL(`http://127.0.0.1:${port}/`);
   url.searchParams.set("file", path.resolve(file));
   const h = str(flags, "handle");
-  console.log(url.toString() + (h ? `#h=${h}` : ""));
+  const href = url.toString() + (h ? `#h=${h}` : "");
+  console.log(href);
+  // People at a terminal get a browser; agents and scripts (piped stdout) get just the URL.
+  if (flags["no-open"] ? false : flags.open ? true : process.stdout.isTTY) openBrowser(href);
 }
 
 function cmdRules(flags: Flags) {
@@ -314,8 +347,7 @@ export async function main(argv: string[]): Promise<number> {
   }
   if (cmd === "view") {
     if (!rest[0]) throw new Error("usage: omakase-cadkit view <file>");
-    if (!existsSync(rest[0])) throw new Error(`no file at ${rest[0]}`);
-    await cmdView(rest[0], flags);
+    await cmdView(DrawingStore.resolve(rest[0]), flags);
     return 0;
   }
   const store = new DrawingStore();

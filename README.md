@@ -54,7 +54,8 @@ omakase-cadkit lint drawing.dwg [more.dwg ...]     # findings; exit 1 on errors;
 omakase-cadkit query drawing.dwg --layer NODE --text '^MH-' --limit 5
 omakase-cadkit network drawing.dwg --csv           # manhole/pipe schedule from the drawing
 omakase-cadkit render drawing.dwg --finding 3 --out f.png
-omakase-cadkit view drawing.dwg --handle 5DF85     # URL to the viewer, zoomed on the entity
+omakase-cadkit view drawing.dwg --handle 5DF85     # opens the viewer, zoomed on the entity
+omakase-cadkit view '~/Work/My Job/D5 & D6.dwg'    # quote paths with spaces; ~ still works
 omakase-cadkit convert in.dxf out.dwg              # DWG <-> DXF, reread to verify
 omakase-cadkit rules                               # every rule and why it exists
 ```
@@ -69,8 +70,9 @@ The drawing toolbar includes Fit, Back (also `Alt+Left`), and buttons to hide ei
 panel. Selecting a finding keeps the finding list open and highlights it on the drawing;
 enable **Show all finding markers** to see the other findings too. Re-running lint preserves your view.
 The renderer reuses image tiles while panning, rendering only newly exposed strips, and skips geometry smaller than a pixel
-at sheet scale; those details appear as you zoom in. Inspection and lint still use the full
-source geometry.
+at sheet scale; those details appear as you zoom in. Linked raster underlays (`IMAGE`) draw beneath the
+vector geometry when the referenced file is next to the drawing; the viewer streams it from the local
+server. Inspection and lint still use the full source geometry.
 
 To check viewer interactions and measure delivered pan frames with Chromium, start the
 server and run:
@@ -172,6 +174,8 @@ skills/omakase-cadkit/         agent skill for using omakase-cadkit on drawings
 
 - Model space only; paper-space layouts and viewports are listed but not drawn.
 - MULTILEADER, REGION, 3D solids and OLE contents are not drawn (counted under `unrendered`).
+- Linked rasters draw in the viewer; SVG render embeds them only when the file is present and at most
+  6 MB, so a large satellite backdrop is drawn in the viewer but left out of exported SVG.
 - Hatch patterns draw as translucent fills; linetypes draw solid.
 - DWG written by ACadSharp round-trips through ACadSharp and LibreDWG; it has not yet been
   opened in AutoCAD itself.
