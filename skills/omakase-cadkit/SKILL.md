@@ -8,8 +8,9 @@ description: Inspect, review and lint AutoCAD drawings (DWG or DXF) with the oma
 omakase-cadkit reads DWG and DXF through ACadSharp and answers in text with entity handles. Use it
 instead of writing ezdxf scripts or reading rendered images. Pixels are the last resort.
 
-Run `omakase-cadkit` (or `node ~/Projects/omakase-cadkit/bin/omakase-cadkit.mjs` if it is not on PATH). The
-first open of a DWG takes a few seconds; later calls hit the cache.
+Follow [source setup](../../docs/setup.md) if the CLI is not installed. From the
+checkout root, use `node bin/omakase-cadkit.mjs` in place of `omakase-cadkit` below.
+The first open of a DWG takes a few seconds; later calls hit the cache.
 
 ## The loop
 
@@ -37,8 +38,8 @@ number pattern, and the sewer conventions (manhole block names, label regexes, l
 `inspect` prints which profile it used. When there is none:
 
 - Do not guess conventions inside your answer. Run `inspect` and `query --layer <x> --type
-  TEXT --limit 20` to see the label patterns, then write a `omakase-cadkit.json` next to the
-  drawings (copy `~/Projects/omakase-cadkit/fixtures/omakase-cadkit.json` as a template) and ask the user to
+  TEXT --limit 20` to see the label patterns, then write an `omakase-cadkit.json` next to the
+  drawings (copy the checkout's `fixtures/omakase-cadkit.json` as a template) and ask the user to
   confirm engineering limits such as `minDepth` and `minSlope`. Those are design decisions,
   not omakase-cadkit defaults.
 

@@ -5,10 +5,12 @@ networks, layouts, sections, detail sheets. It is built for an agent and a revie
 together. The agent gets text with entity handles; the reviewer gets a viewer that jumps to
 those handles.
 
-It is also the reference build for the parked Omakase CAD workstream
-(`omakase-v2/docs/plans/active/cad-drawings-plan.md`). The process split is the one Omakase
-would use: a supervised sidecar owns the file format, a service owns files and lint, and a
-framework-free canvas renders bounded JSON.
+The source CLI and viewer work today. A reusable npm library and versioned package
+are being prepared; there is no supported package import API yet. See the compact
+[outcome map](docs/outcomes.md) for current work and what comes next.
+
+A supervised sidecar owns the file format, a service owns files and lint, and a
+framework-free canvas renders bounded JSON. No Omakase installation is required.
 
 ```
 DWG/DXF ──> sidecar (C#, ACadSharp)  ──payload JSON──>  cache (~/.cache/omakase-cadkit)
@@ -20,16 +22,29 @@ DWG/DXF ──> sidecar (C#, ACadSharp)  ──payload JSON──>  cache (~/.ca
 
 ## Setup
 
-Needs Node 23.6+ (runs the TypeScript directly), the .NET 8 SDK (`~/.dotnet` is found
-automatically), and for fixtures `uv`.
+Needs Node 23.6+, the .NET 8 SDK and runtime, and `uv`. See
+[setup for people and agents](docs/setup.md) for prerequisites, troubleshooting,
+optional tools, and tested platform limits. From your checkout:
 
 ```bash
-npm install
-npm run build            # sidecar + viewer bundle
-npm run fixtures         # synthetic test drawings
-npm test
-ln -s "$PWD/bin/omakase-cadkit.mjs" ~/.local/bin/omakase-cadkit   # optional
+cd /path/to/omakase-cadkit
+npm ci
+npm run setup
+node bin/omakase-cadkit.mjs inspect fixtures/sewer_clean.dxf
+node bin/omakase-cadkit.mjs view fixtures/sewer_bad.dxf
 ```
+
+`setup` builds, generates synthetic drawings, typechecks, and tests without private
+files. Use `node bin/omakase-cadkit.mjs` from the checkout for commands below, or
+optionally run `npm link` to make the short command available.
+
+## Start here
+
+- **Use the tool:** [setup and first drawing](docs/setup.md), then commands below.
+- **Have an agent review a drawing:** [bundled drawing skill](skills/omakase-cadkit/SKILL.md).
+- **Contribute:** [CONTRIBUTING.md](CONTRIBUTING.md); agents also read [AGENTS.md](AGENTS.md).
+- **Choose the next work:** [outcomes](docs/outcomes.md).
+- **Read evidence or leave a handoff:** [devlogs and template](.devlog/README.md).
 
 ## Use
 
@@ -94,8 +109,8 @@ depth limits, labelled vs drawn pipe length, pipes ending at manholes and networ
 flow arrows that point uphill, and diameters that shrink downstream.
 
 Rules run on the payload, not on pixels. Labels are matched to symbols by an assignment
-that minimises total distance, in each label block's own rotated frame. On the private D3
-network (589 manholes, 589 pipes) every pairing agrees with the hydraulic model.
+that minimises total distance, in each label block's own rotated frame. On a private
+589-manhole sewerage plan every pairing agrees with an independent hydraulic model.
 
 ## Layout
 
@@ -120,3 +135,7 @@ skills/omakase-cadkit/         agent skill for using omakase-cadkit on drawings
 - Hatch patterns draw as translucent fills; linetypes draw solid.
 - DWG written by ACadSharp round-trips through ACadSharp and LibreDWG; it has not yet been
   opened in AutoCAD itself.
+
+## License
+
+[MIT](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md) for ACadSharp attribution.

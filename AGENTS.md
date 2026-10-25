@@ -3,6 +3,18 @@
 omakase-cadkit views, inspects and lints DWG/DXF drawings. Read `README.md` for the shape. Using
 omakase-cadkit on drawings (not developing it) is covered by `skills/omakase-cadkit/SKILL.md`.
 
+## Start and hand off
+
+- Setup is documented in `docs/setup.md`: `npm ci`, then `npm run setup` from the checkout.
+  It uses synthetic drawings; private DWGs and Omakase are not required.
+- Read `docs/outcomes.md` for current state and the next useful action, then its linked
+  devlog. Keep planning outcome-based; do not expand it into detailed implementation plans.
+- Record meaningful changes, decisions, exact checks and limits in `.devlog/YYYY-MM-DD-sNN.md`
+  using `.devlog/TEMPLATE.md`. Update the outcome row when its state or next action changes.
+- `CONTRIBUTING.md` covers contribution and evidence expectations. Source checks do not
+  establish installed-package or cross-platform support. MIT is selected; npm publishing
+  remains disabled until the package outcome is verified.
+
 ## Commands
 
 - `npm run build:sidecar` after any change to `sidecar/Program.cs`. The payload cache is keyed

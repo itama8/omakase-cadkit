@@ -1,6 +1,6 @@
 // End-to-end tests: sidecar -> payload -> sheet analysis -> lint -> SVG.
-// Needs `npm run build:sidecar` and `npm run fixtures`. The private block runs only on a
-// machine that has the project drawings.
+// Needs `npm run build:sidecar` and `npm run fixtures`. The private drawing block runs
+// only on a machine that has that drawing.
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -186,8 +186,8 @@ describe("convert", () => {
   });
 });
 
-const PRIVATE_DWG = "/path/to/private-drawing.dwg";
-describe("private D3 R5 (real drawing, local only)", { skip: !existsSync(PRIVATE_DWG) && "drawing not on this machine" }, () => {
+const PRIVATE_DWG = process.env.OMAKASE_CADKIT_PRIVATE_DWG ?? "";
+describe("private drawing (local only)", { skip: !existsSync(PRIVATE_DWG) && "set OMAKASE_CADKIT_PRIVATE_DWG to run the private regression" }, () => {
   test("known findings", async () => {
     const { ctx, result } = await lintFile(PRIVATE_DWG);
     const f = (rule: string) => result.findings.filter((x) => x.rule === rule);
