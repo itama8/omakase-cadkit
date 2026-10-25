@@ -113,6 +113,8 @@ export class DrawingCanvas {
   private rasterOriginY = 0;
   private drawingVersion = 0;
   images: RasterOverlay[] = [];
+  /** Raster images (aerial photos, scans) drawn behind the linework, independent of layers. */
+  private imagesVisible = true;
   lastDrawMs = 0;
   lastTextCount = 0;
   viewRevision = 0;
@@ -165,6 +167,17 @@ export class DrawingCanvas {
 
   setImages(images: RasterOverlay[]) {
     this.images = images;
+    this.drawingVersion++;
+    this.request();
+  }
+
+  get showImages() {
+    return this.imagesVisible;
+  }
+
+  set showImages(on: boolean) {
+    if (on === this.imagesVisible) return;
+    this.imagesVisible = on;
     this.drawingVersion++;
     this.request();
   }
@@ -406,10 +419,10 @@ export class DrawingCanvas {
     const screen = () => ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     const onScreen = (b: ArrayLike<number>) => b[0] <= vis[2] && b[2] >= vis[0] && b[1] <= vis[3] && b[3] >= vis[1];
 
-    // Anchor raster tiles to drawing space at this scale. Long pans render only newly
-    // exposed tiles; crossing a cache boundary never repaints the whole viewport.
+    // Anchor raster tiles to drawing space at this scale. Long pans and panel resizes render
+    // only newly exposed tiles; crossing a cache boundary never repaints the whole viewport.
     const left = this.cx * s - this.width / 2, top = -this.cy * s - this.height / 2;
-    const key = `${this.drawingVersion}|${this.canvas.width}|${this.canvas.height}|${this.dpr}|${s}|${[...this.hiddenLayers].sort().join(",")}|${[...this.selected].join(",")}|${JSON.stringify(theme)}`;
+    const key = `${this.drawingVersion}|${this.dpr}|${s}|${[...this.hiddenLayers].sort().join(",")}|${[...this.selected].join(",")}|${JSON.stringify(theme)}`;
     if (key !== this.sceneKey) {
       for (const tile of this.rasters.values()) tile.canvas.width = tile.canvas.height = 1;
       this.rasters.clear();
@@ -433,7 +446,8 @@ export class DrawingCanvas {
         this.rasters.delete(id);
         this.rasters.set(id, tile);
         labels += tile.labels;
-        ctx.drawImage(tile.canvas, tileLeft - left - RASTER_BLEED, tileTop - top - RASTER_BLEED, tile.canvas.width / this.dpr, tile.canvas.height / this.dpr);
+        // Whole pixels keep cached text sharp when a resize leaves the centre on a half pixel.
+        ctx.drawImage(tile.canvas, Math.round(tileLeft - left) - RASTER_BLEED, Math.round(tileTop - top) - RASTER_BLEED, tile.canvas.width / this.dpr, tile.canvas.height / this.dpr);
       }
     this.lastTextCount = labels;
     // About 64 MB of raster pixels, allowing at least the current viewport on large screens.
@@ -527,7 +541,7 @@ export class DrawingCanvas {
   }
 
   private drawImages(ctx: CanvasRenderingContext2D, vis: number[]) {
-    if (!this.images.length) return;
+    if (!this.images.length || !this.imagesVisible) return;
     const [ox, oy] = this.drawing!.origin;
     for (const img of this.images) {
       if (this.hiddenLayers.has(img.layer)) continue;

@@ -17,6 +17,9 @@ handoffs live in [devlogs](../.devlog/README.md). Updated 2026-10-25.
 |---|---|---|---|---|
 | O4 | A user installs a versioned package that works outside the source checkout. | active | Installed tarball contains compiled JS, types, viewer assets, notices, and a working sidecar strategy; CLI and library smoke tests pass on declared supported platforms. | Compiled CLI and library install and run from a tarball; choose how the sidecar ships, then repeat the rehearsal with a drawing open. [Evidence](../.devlog/2026-10-25-s05.md). |
 
+| O6 | Pan, zoom and selection feel instant on heavy drawings. | queued | On a private ~152k-primitive survey drawing at DPR 2, zoom and selection frames stay under 20 ms (50+ fps) in the headless benchmark and feel smooth in a real browser; open time does not regress. | Remove selection from the raster-tile cache key and zoom by scaling cached tiles, refining once input settles. Baseline: [s08](../.devlog/2026-10-25-s08.md). |
+| O7 | A reviewer can measure and compare revisions without leaving the viewer. | queued | Distance, area and coordinates snap to endpoints, midpoints and centres on fixtures; a two-revision fixture pair shows added, deleted and modified entities as findings with handles and bboxes. | Start after O6. Measure with snapping first; revision compare second. Editing remains out of scope. |
+
 ## After those
 
 | ID | Desired outcome | State | Evidence needed to call it done | Next action |
@@ -42,4 +45,4 @@ Borrowed from Omakase: read current state before deeper history, separate accept
 from implementation, choose a runnable next action, and keep evidence in devlogs.
 This repository has no dependency on Omakase's skills, plans, or tooling.
 
-Latest evidence: [2026-10-25-s07](../.devlog/2026-10-25-s07.md).
+Latest evidence: [2026-10-25-s08](../.devlog/2026-10-25-s08.md).

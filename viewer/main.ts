@@ -8,6 +8,7 @@ const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySe
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 const fmt = (n: number, d = 3) => (Math.abs(n) >= 1000 ? n.toLocaleString("en-US", { maximumFractionDigits: 2 }) : String(Math.round(n * 10 ** d) / 10 ** d));
 const hexOf = (rgb: number) => "#" + rgb.toString(16).padStart(6, "0");
+const parentDir = (p: string) => p.slice(0, Math.max(1, p.lastIndexOf("/")));
 
 interface LintPayload {
   findings: Finding[];
@@ -67,6 +68,53 @@ function backView() {
   $<HTMLButtonElement>("#view-back").disabled = !previousViews.length;
 }
 
+// ------------------------------------------------------------------ per-file view settings
+
+// Layer visibility and the background image are remembered per drawing. A saved entry is
+// dropped once the file changes on disk (size or mtime), so a revision opens with defaults.
+const VIEWS_KEY = "omakase-cadkit-views";
+const VIEWS_LIMIT = 50;
+interface SavedView {
+  version: string;
+  hidden: string[]; // layer names
+  background: boolean;
+}
+let fileVersion = "";
+function savedViews(): Record<string, SavedView> {
+  try {
+    return JSON.parse(localStorage.getItem(VIEWS_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+function saveViewSettings() {
+  if (!drawing || !fileVersion) return;
+  const all = savedViews();
+  const key = drawing.source.path;
+  delete all[key]; // re-insert last, so the oldest entries are dropped first
+  all[key] = { version: fileVersion, hidden: [...view.hiddenLayers].map((i) => drawing!.layers[i].name), background: view.showImages };
+  const keys = Object.keys(all);
+  for (const k of keys.slice(0, Math.max(0, keys.length - VIEWS_LIMIT))) delete all[k];
+  localStorage.setItem(VIEWS_KEY, JSON.stringify(all));
+}
+/** Applies saved settings for the open drawing, or the file's own defaults. */
+function restoreViewSettings() {
+  const d = drawing!;
+  const all = savedViews();
+  let saved: SavedView | undefined = all[d.source.path];
+  if (saved && saved.version !== fileVersion) {
+    delete all[d.source.path];
+    localStorage.setItem(VIEWS_KEY, JSON.stringify(all));
+    saved = undefined;
+  }
+  initialLayers();
+  if (saved) {
+    const hidden = new Set(saved.hidden);
+    view.hiddenLayers = new Set(d.layers.map((l, i) => (hidden.has(l.name) ? i : -1)).filter((i) => i >= 0));
+  }
+  setBackgroundImage(saved?.background ?? true, false);
+}
+
 // ------------------------------------------------------------------ tabs
 
 for (const nav of document.querySelectorAll<HTMLElement>(".tabs")) {
@@ -84,6 +132,78 @@ function showTab(nav: HTMLElement | string, tab: string) {
   $(`#toggle-${id}`).setAttribute("aria-expanded", "true");
   n.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x.dataset.tab === tab));
   side.querySelectorAll<HTMLElement>(".pane").forEach((p) => p.classList.toggle("on", p.dataset.pane === tab));
+}
+
+// ------------------------------------------------------------------ resizable panels
+
+// Drag a panel edge or the Browse/Recent divider; double-click resets. Sizes are a layout
+// preference, so they apply to every drawing.
+const LAYOUT_KEY = "omakase-cadkit-layout";
+interface Resizer {
+  prop: string;
+  axis: "x" | "y";
+  sign: 1 | -1; // +1 when moving right/down grows the panel
+  min: number;
+  max: () => number;
+  el: () => HTMLElement;
+}
+const resizers: Record<string, Resizer> = {
+  left: { prop: "--left-size", axis: "x", sign: 1, min: 200, max: () => innerWidth * 0.45, el: () => $("#left") },
+  right: { prop: "--right-size", axis: "x", sign: -1, min: 260, max: () => innerWidth * 0.5, el: () => $("#right") },
+  recent: { prop: "--recent-size", axis: "y", sign: -1, min: 40, max: () => $('[data-pane="files"]').getBoundingClientRect().height - 160, el: () => $("#recent") },
+};
+const layoutSizes: Record<string, number> = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+})();
+for (const [name, px] of Object.entries(layoutSizes)) if (resizers[name]) document.body.style.setProperty(resizers[name].prop, `${px}px`);
+function setPanelSize(name: string, px: number | null) {
+  const r = resizers[name];
+  if (px === null) {
+    document.body.style.removeProperty(r.prop);
+    delete layoutSizes[name];
+  } else {
+    layoutSizes[name] = Math.round(Math.max(r.min, Math.min(r.max(), px)));
+    document.body.style.setProperty(r.prop, `${layoutSizes[name]}px`);
+  }
+  localStorage.setItem(LAYOUT_KEY, JSON.stringify(layoutSizes));
+}
+const panelSize = (r: Resizer) => (r.axis === "x" ? r.el().getBoundingClientRect().width : r.el().getBoundingClientRect().height);
+for (const handle of document.querySelectorAll<HTMLElement>(".resizer")) {
+  const name = handle.dataset.resize!;
+  const r = resizers[name];
+  let start: { at: number; size: number; pointerId: number } | null = null;
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    start = { at: r.axis === "x" ? e.clientX : e.clientY, size: panelSize(r), pointerId: e.pointerId };
+    handle.classList.add("dragging");
+    document.body.classList.add("resizing", r.axis === "x" ? "col-resize" : "row-resize");
+  });
+  handle.addEventListener("pointermove", (e) => {
+    if (!start || e.pointerId !== start.pointerId) return;
+    setPanelSize(name, start.size + r.sign * ((r.axis === "x" ? e.clientX : e.clientY) - start.at));
+  });
+  const end = () => {
+    start = null;
+    handle.classList.remove("dragging");
+    document.body.classList.remove("resizing", "col-resize", "row-resize");
+  };
+  handle.addEventListener("pointerup", end);
+  handle.addEventListener("lostpointercapture", end);
+  handle.addEventListener("dblclick", () => setPanelSize(name, null));
+  handle.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 64 : 16;
+    const keys: Record<string, number> = r.axis === "x" ? { ArrowLeft: -1, ArrowRight: 1 } : { ArrowUp: -1, ArrowDown: 1 };
+    const dir = keys[e.key];
+    if (!dir) return;
+    e.preventDefault();
+    setPanelSize(name, panelSize(r) + r.sign * dir * step);
+  });
 }
 
 // ------------------------------------------------------------------ status
@@ -112,7 +232,6 @@ async function open(path: string, opts: { hash?: string } = {}) {
   previousViews.length = 0;
   $<HTMLButtonElement>("#view-back").disabled = true;
   file = path;
-  $<HTMLInputElement>("#path").value = path;
   const url = new URL(location.href);
   url.searchParams.set("file", path);
   url.hash = opts.hash ?? "";
@@ -125,14 +244,17 @@ async function open(path: string, opts: { hash?: string } = {}) {
     if (!res.ok) throw new Error((await res.json()).error ?? res.statusText);
     const serverMs = Number(res.headers.get("x-omakase-cadkit-ms") ?? res.headers.get("x-drawkit-ms") ?? 0);
     const cached = (res.headers.get("x-omakase-cadkit-cached") ?? res.headers.get("x-drawkit-cached")) === "true";
+    const version = res.headers.get("x-omakase-cadkit-file-version") ?? "";
     const loaded = (await res.json()) as Drawing;
     if (request !== openRequest) return;
     drawing = loaded;
+    fileVersion = version;
     homeBox = null;
     byHandle = new Map(drawing.entities.map((e, i) => [e.h, i]));
     view.setDrawing(drawing);
+    $("#background-tools").hidden = true;
     void loadImages(request, drawing, path);
-    initialLayers();
+    restoreViewSettings();
     renderLayers();
     renderMeta();
     overlay(null);
@@ -143,6 +265,7 @@ async function open(path: string, opts: { hash?: string } = {}) {
     if (request !== openRequest) return;
     applyHash();
     loadRecent();
+    void browse(parentDir(drawing.source.path));
   } catch (err: any) {
     if (request !== openRequest) return;
     overlay(`Could not open: ${err.message ?? err}`, "error");
@@ -169,26 +292,47 @@ async function loadImages(request: number, drawing: Drawing, path: string) {
     return bitmap ? ({ ...r, bitmap } as RasterOverlay) : null;
   }));
   if (request !== openRequest) return;
-  view.setImages(loaded.filter((x): x is RasterOverlay => x !== null));
+  const images = loaded.filter((x): x is RasterOverlay => x !== null);
+  view.setImages(images);
+  $("#background-tools").hidden = !images.length;
+  renderLayers();
 }
 
-$("#open-form").addEventListener("submit", (e) => {
+function setBackgroundImage(on: boolean, save = true) {
+  view.showImages = on;
+  const button = $("#background-image");
+  button.setAttribute("aria-pressed", String(on));
+  button.title = `${on ? "Hide" : "Show"} background image (B)`;
+  renderLayers();
+  if (save) saveViewSettings();
+}
+$("#background-image").addEventListener("click", () => setBackgroundImage(!view.showImages));
+
+$("#open-button").addEventListener("click", () => {
+  showTab("left", "files");
+  void browse(drawing ? parentDir(drawing.source.path) : undefined);
+});
+$("#path-form").addEventListener("submit", (e) => {
   e.preventDefault();
   const p = $<HTMLInputElement>("#path").value.trim();
-  if (p) open(p);
+  if (!p) return;
+  if (/\.(dwg|dxf)$/i.test(p)) open(p);
+  else void browse(p);
 });
 
 function renderMeta() {
   if (!drawing) return;
   const d = drawing;
-  const name = d.source.path.split("/").pop()!;
+  const title = $("#doc-name");
+  title.textContent = d.source.path.split("/").pop()!.replace(/\.(dwg|dxf)$/i, "");
+  title.title = d.source.path;
+  title.classList.remove("empty");
   const errors = lint?.counts.error ?? 0;
   const warnings = lint?.counts.warning ?? 0;
   const issue = errors || warnings
     ? `<span class="chip alert" title="Errors and warnings in this drawing"><strong>${errors}</strong> err <strong>${warnings}</strong> warn</span>`
     : `<span class="chip" title="No errors or warnings"><strong>clean</strong></span>`;
   $("#meta").innerHTML =
-    `<span class="chip file-chip" title="${esc(d.source.path)}"><b>${esc(name)}</b></span>` +
     `<span class="chip">${esc(d.acadVersion)} ${esc(d.source.format.toUpperCase())}</span>` +
     `<span class="chip">${d.entities.length.toLocaleString()} entities</span>` +
     `<span class="chip meta-units">units ${esc(d.header.insUnits)}</span>` +
@@ -211,7 +355,13 @@ function renderLayers() {
     .map((l, i) => ({ l, i }))
     .filter(({ l }) => l.entities > 0 && l.name.toLowerCase().includes(filter))
     .sort((a, b) => b.l.entities - a.l.entities);
-  $("#layers").innerHTML = rows
+  // Images are not a layer, but reviewers look for them here; pin a row above the layers.
+  const images = view.images.length;
+  const background = images && !filter
+    ? `<li data-background class="layer background ${view.showImages ? "" : "off"}" title="Aerial photos and scans drawn behind the linework. Hides independently of layers (B).">` +
+      `<svg class="layer-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-image" /></svg><span class="name">Background image</span><span class="count">${images}</span></li>`
+    : "";
+  $("#layers").innerHTML = background + rows
     .map(
       ({ l, i }) =>
         `<li data-i="${i}" class="layer ${view.hiddenLayers.has(i) ? "off" : ""}" title="${esc(l.name)}${!l.on ? " (off in file)" : ""}${l.frozen ? " (frozen in file)" : ""}. Alt-click to show only this layer.">` +
@@ -225,24 +375,30 @@ function renderLayers() {
 $("#layers").addEventListener("click", (e) => {
   const li = (e.target as HTMLElement).closest("li");
   if (!li || !drawing) return;
+  if ("background" in li.dataset) return setBackgroundImage(!view.showImages);
   const i = Number(li.dataset.i);
   if ((e as MouseEvent).altKey) {
-    view.hiddenLayers = new Set(drawing.layers.map((_, j) => j).filter((j) => j !== i));
+    // Alt-click the isolated layer again to show every layer.
+    const isolated = !view.hiddenLayers.has(i) && view.hiddenLayers.size === drawing.layers.length - 1;
+    view.hiddenLayers = isolated ? new Set() : new Set(drawing.layers.map((_, j) => j).filter((j) => j !== i));
   } else if (view.hiddenLayers.has(i)) view.hiddenLayers.delete(i);
   else view.hiddenLayers.add(i);
   renderLayers();
+  saveViewSettings();
   view.request();
 });
 $("#layer-filter").addEventListener("input", renderLayers);
 $("#layers-all").addEventListener("click", () => {
   view.hiddenLayers.clear();
   renderLayers();
+  saveViewSettings();
   view.request();
 });
 $("#layers-none").addEventListener("click", () => {
   if (!drawing) return;
   view.hiddenLayers = new Set(drawing.layers.map((_, i) => i));
   renderLayers();
+  saveViewSettings();
   view.request();
 });
 
@@ -292,8 +448,14 @@ async function loadRecent() {
 }
 async function browse(dir?: string) {
   const r = await fetch(`/api/files${dir ? "?dir=" + encodeURIComponent(dir) : ""}`).then((r) => r.json());
-  if (r.error) return;
-  $("#dir-label").textContent = r.dir;
+  if (r.error) {
+    $("#dir").innerHTML = `<li class="hint">${esc(r.error)}</li>`;
+    return;
+  }
+  const field = $<HTMLInputElement>("#path");
+  field.value = r.dir;
+  field.title = r.dir;
+  field.scrollLeft = field.scrollWidth; // keep the folder name, not the root, in view
   $("#dir").innerHTML =
     `<li class="dir" data-d="${esc(r.parent)}"><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron-left" /></svg><span class="name">..</span></li>` +
     r.entries.map((e: any) => (e.dir ? `<li class="dir" data-d="${esc(e.path)}"><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder" /></svg><span class="name">${esc(e.name)}</span></li>` : `<li data-p="${esc(e.path)}"><span class="name">${esc(e.name)}</span><span class="size">${(e.size / 1e6).toFixed(1)} MB</span></li>`)).join("");
@@ -658,6 +820,7 @@ window.addEventListener("keydown", (e) => {
   if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); backView(); return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === "f" || e.key === "F") home();
+  else if ((e.key === "b" || e.key === "B") && view.images.length) setBackgroundImage(!view.showImages);
   else if (e.key === "Escape") {
     view.selected.clear();
     view.activeFinding = null;

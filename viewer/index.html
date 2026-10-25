@@ -25,6 +25,11 @@
         <path d="M14.5 4.5v15" stroke="currentColor" stroke-width="1.5" />
       </symbol>
       <symbol id="i-back" viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24">
+        <rect x="4" y="5.5" width="16" height="13" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6" />
+        <path d="m4.5 16 4.5-4.5 3.5 3.5 2.5-2.5 4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+        <circle cx="15.5" cy="9.5" r="1.4" fill="currentColor" />
+      </symbol>
       <symbol id="i-fit" viewBox="0 0 24 24">
         <path d="M9 4H4v5M15 4h5v5M15 20h5v-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
       </symbol>
@@ -78,11 +83,12 @@
         <span class="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-mark" /></svg></span>
         <span class="brand-text"><span class="brand-name">omakase cadkit</span><span class="brand-sub">drawing review</span></span>
       </a>
-      <form id="open-form" role="search">
-        <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-target" /></svg>
-        <input id="path" type="text" spellcheck="false" placeholder="Open drawing path — .dwg or .dxf" autocomplete="off" aria-label="Drawing path" />
-        <button type="submit" class="btn-open">Open</button>
-      </form>
+      <div id="doc-title">
+        <h1 id="doc-name" class="empty">No drawing open</h1>
+        <button id="open-button" class="icon-btn" title="Open a drawing" aria-label="Open a drawing">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder" /></svg>
+        </button>
+      </div>
       <div class="head-right">
         <div id="meta" class="meta"></div>
         <div class="head-actions">
@@ -97,6 +103,7 @@
     </header>
 
     <aside id="left" aria-label="Layers, search and files">
+      <div class="resizer col" data-resize="left" role="separator" aria-orientation="vertical" aria-label="Resize left panel" tabindex="0" title="Drag to resize, double-click to reset"></div>
       <nav class="tabs" data-for="left">
         <button data-tab="layers" class="on">Layers</button>
         <button data-tab="search">Find</button>
@@ -116,7 +123,7 @@
           <button id="layers-none" class="ghost" title="Hide all layers">None</button>
         </div>
         <ul id="layers" class="list layers"></ul>
-        <p class="pane-foot">Alt-click a layer to isolate it.</p>
+        <p class="pane-foot">Alt-click a layer to isolate it; Alt-click it again to show all.</p>
       </section>
       <section data-pane="search" class="pane">
         <div class="pane-head"><span class="micro-label">Text search</span><span class="micro-value">regex ok</span></div>
@@ -131,10 +138,18 @@
         <p class="pane-foot"><kbd>/</kbd> focuses search from the drawing.</p>
       </section>
       <section data-pane="files" class="pane">
-        <div class="pane-head"><span class="micro-label">Recent</span></div>
-        <ul id="recent" class="list files"></ul>
-        <div class="pane-head"><span class="micro-label">Browse</span><span id="dir-label" class="micro-value"></span></div>
+        <div class="pane-head"><span class="micro-label">Browse</span></div>
+        <form id="path-form" class="row tools">
+          <div class="field">
+            <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-target" /></svg>
+            <input id="path" type="text" spellcheck="false" placeholder="Path to a folder or drawing" autocomplete="off" aria-label="Folder or drawing path" />
+          </div>
+          <button type="submit" class="ghost">Go</button>
+        </form>
         <ul id="dir" class="list files"></ul>
+        <div class="resizer row-split" data-resize="recent" role="separator" aria-orientation="horizontal" aria-label="Resize recent files" tabindex="0" title="Drag to resize, double-click to reset"></div>
+        <div class="pane-head"><span class="micro-label">Recent</span></div>
+        <ul id="recent" class="list files recent"></ul>
       </section>
     </aside>
 
@@ -164,6 +179,11 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg>
           </button>
         </div>
+        <div class="tool-group" id="background-tools" hidden>
+          <button id="background-image" class="icon-btn" aria-pressed="true" aria-label="Background image" title="Hide background image (B)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-image" /></svg>
+          </button>
+        </div>
       </div>
 
       <div id="navigation-hint"><span class="micro-label">Drag</span> pan <span class="sep">·</span> <span class="micro-label">Wheel</span> zoom <span class="sep">·</span> <span class="micro-label">Click</span> inspect</div>
@@ -190,7 +210,7 @@
           <text x="204" y="126" class="empty-art-label" text-anchor="end">1:500 · A1</text>
         </svg>
         <h1>Open a drawing</h1>
-        <p class="empty-lead">Paste a path above, pick a recent file under <b>Files</b>, or run <code>omakase-cadkit view &lt;file&gt;</code>.</p>
+        <p class="empty-lead">Use the folder button next to the title to browse, pick a recent file under <b>Files</b>, or run <code>omakase-cadkit view &lt;file&gt;</code>.</p>
         <div class="empty-keys">
           <span><kbd>F</kbd> fit sheet</span>
           <span><kbd>wheel</kbd> zoom</span>
@@ -202,6 +222,7 @@
     </main>
 
     <aside id="right" aria-label="Findings, inspect and sheet">
+      <div class="resizer col" data-resize="right" role="separator" aria-orientation="vertical" aria-label="Resize right panel" tabindex="0" title="Drag to resize, double-click to reset"></div>
       <nav class="tabs" data-for="right">
         <button data-tab="findings" class="on">Findings <span id="finding-badge" class="badge"></span></button>
         <button data-tab="inspect">Inspect</button>
@@ -268,7 +289,8 @@
         <div>
           <h3>Tips</h3>
           <dl>
-            <dt><kbd>Alt</kbd> + click layer</dt><dd>Isolate one layer</dd>
+            <dt><kbd>Alt</kbd> + click layer</dt><dd>Isolate one layer; again to show all</dd>
+            <dt><kbd>B</kbd></dt><dd>Show or hide the background image</dd>
             <dt><kbd>Shift</kbd> + click finding</dt><dd>Keep the view, highlight only</dd>
           </dl>
         </div>
