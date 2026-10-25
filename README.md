@@ -25,8 +25,11 @@ DWG/DXF ──> sidecar (C#, ACadSharp)  ──payload JSON──>  cache (~/.ca
 For automatic setup, download and extract the repository, then use **`setup.cmd` on
 Windows** or **`bash setup.command` on macOS/Linux**. It checks dependencies,
 installs missing tools locally, and builds and verifies the app. Afterward, use
-`launch.cmd` or `launch.command` to open the empty viewer. Linux x64 is locally
-verified; Windows/macOS verification remains pending. See [setup](docs/setup.md).
+`launch.cmd` or `launch.command` to open the empty viewer. CI runs Setup and opens
+a synthetic drawing through Launch on Linux x64, macOS on Apple Silicon and Intel,
+and Windows x64. Windows ARM64 and Linux ARM64 pass the platform checks but no run
+covers them. See [setup](docs/setup.md) and, for what an alpha does not do yet,
+[trying an alpha](docs/setup.md#trying-an-alpha).
 
 For manual developer setup: needs Node 23.6+, the .NET 8 SDK and runtime, and `uv`. See
 [setup for people and agents](docs/setup.md) for prerequisites, troubleshooting,
@@ -46,7 +49,8 @@ optionally run `npm link` to make the short command available.
 
 ## Start here
 
-- **Use the tool:** [setup and first drawing](docs/setup.md), then commands below.
+- **Try the tool:** [setup and first drawing](docs/setup.md), then commands below;
+alpha limits and reporting are in [trying an alpha](docs/setup.md#trying-an-alpha).
 - **Have an agent review a drawing:** [bundled drawing skill](skills/omakase-cadkit/SKILL.md).
 - **Contribute:** [CONTRIBUTING.md](CONTRIBUTING.md); agents also read [AGENTS.md](AGENTS.md).
 - **Choose the next work:** [outcomes](docs/outcomes.md).

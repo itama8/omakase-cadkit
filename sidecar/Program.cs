@@ -563,7 +563,7 @@ sealed class Payload
 
 	// TEXT control codes for display: %%u/%%o/%%k toggle under/overline and strike-through,
 	// %%d %%p %%c are degree, plus-minus and diameter, %%nnn is a character code.
-	static string TextPlain(string? s)
+	static string TextPlain(string s)
 	{
 		if (string.IsNullOrEmpty(s) || !s.Contains("%%")) return s ?? "";
 		var sb = new StringBuilder(s.Length);
@@ -734,7 +734,7 @@ sealed class Payload
 
 	// Times-like faces are drawn with a metric-compatible serif; everything else (Arial, SHX
 	// stroke fonts) with the sans fallback.
-	static bool IsSerif(TextStyle? st)
+	static bool IsSerif(TextStyle st)
 	{
 		var f = ((st?.Filename ?? "") + "|" + (st?.Name ?? "")).ToLowerInvariant();
 		return !f.Contains("sans") && (f.Contains("times") || f.Contains("georgia") || f.Contains("garamond")
@@ -744,7 +744,7 @@ sealed class Payload
 
 	// Narrow faces (Arial Narrow, ARIALN.TTF, condensed) are drawn as the regular face squeezed:
 	// Arial Narrow's advances are 82% of Arial's.
-	static double FaceWidth(TextStyle? st)
+	static double FaceWidth(TextStyle st)
 	{
 		var f = ((st?.Filename ?? "") + "|" + (st?.Name ?? "")).ToLowerInvariant();
 		return f.Contains("narrow") || f.Contains("condensed") || f.Contains("arialn") ? 0.82 : 1;

@@ -37,10 +37,13 @@ To check without installing, run `bash setup.command --check`, or
 `./scripts/bootstrap.ps1 -Check` in Windows PowerShell. To install private copies
 of all tools regardless of system installations, use `--local-tools` or `-LocalTools`.
 
-The bootstrap is verified locally on Linux x64. Windows and macOS CI jobs are
-configured but are not evidence of a successful run until their results are checked.
-Linux still needs the OS libraries required by Node/.NET, plus Bash, curl, tar and
-a SHA-256 utility; this installer does not modify the operating system.
+CI runs Setup and then opens a synthetic drawing through Launch on Ubuntu 24.04,
+macOS 14 (Apple Silicon), macOS 15 (Intel) and Windows Server 2022 on every push;
+see the [workflow](../.github/workflows/ci.yml). Those four runs are the platform
+evidence. Windows ARM64 and Linux ARM64 pass the platform checks in the bootstrap
+but no run covers them. Linux still needs the OS libraries required by Node/.NET,
+plus Bash, curl, tar and a SHA-256 utility; this installer does not modify the
+operating system.
 
 ## Prerequisites
 
@@ -122,6 +125,27 @@ For automated viewer checks, start a server, then use the printed drawing URL:
 cd /path/to/omakase-cadkit
 node scripts/shot.mjs 'http://127.0.0.1:4280/?file=/absolute/path/to/fixtures/sewer_bad.dxf' viewer.png 1500 900 --check
 ```
+
+## Trying an alpha
+
+An alpha is a source ZIP plus Setup, not an installable package. There is no
+`npm install omakase-cadkit` yet, no auto-update, and no installer for a system
+package manager. Keep the extracted folder; launching from it is the whole
+installation.
+
+What to try, in order: launch with no drawing, open a project drawing, run `lint`
+on it, click a finding, and use **Copy AutoCAD selection**. Then compare a few
+labels and title blocks against the issued PDF or plot. Text size, wrapped MTEXT
+and the sans/serif faces now follow AutoCAD, but hatch textures, linetypes and the
+contents of embedded OLE tables are not drawn.
+
+Known limits: model space only (layouts are listed, not drawn), and MULTILEADER,
+REGION, 3D solids and OLE contents are counted as unrendered. A DWG written by
+`convert` has been read back by ACadSharp and LibreDWG, not opened in AutoCAD
+itself. Report a problem as a GitHub issue with the operating system and
+architecture, the commands you ran, the exit code, and which step above failed.
+Attach the synthetic fixtures from `fixtures/` when they reproduce it, and keep
+private drawings and `~/.cache/omakase-cadkit` local.
 
 ## Troubleshooting and configuration
 
