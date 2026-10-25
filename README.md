@@ -49,6 +49,21 @@ search, findings with jump-to, an entity inspector, and sheet facts. `F` fits, `
 through findings, `/` searches text, clicking an entity inspects it. URLs carry `#h=HANDLE`
 or `#f=N`, so an agent can hand over an exact place.
 
+Drag with the left or middle button to pan; use the wheel or the +/− buttons to zoom.
+The drawing toolbar includes Fit, Back (also `Alt+Left`), and buttons to hide either side
+panel. Selecting a finding keeps the finding list open and highlights it on the drawing;
+enable **Show all finding markers** to see the other findings too. Re-running lint preserves your view.
+The renderer reuses image tiles while panning, rendering only newly exposed strips, and skips geometry smaller than a pixel
+at sheet scale; those details appear as you zoom in. Inspection and lint still use the full
+source geometry.
+
+To check viewer interactions and measure delivered pan frames with Chromium, start the
+server and run:
+
+```bash
+node scripts/shot.mjs 'http://127.0.0.1:4280/?file=/absolute/path/to/drawing.dwg' /tmp/viewer.png 1500 900 --check
+```
+
 ## Project profile
 
 A `drawkit.json` in the drawing's folder or any parent sets what the file cannot say about

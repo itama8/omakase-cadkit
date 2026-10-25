@@ -29,6 +29,19 @@ let packs: string[] | null = null;
 const sevOn: Record<Severity, boolean> = { error: true, warning: true, info: false };
 let visibleFindings: Finding[] = [];
 let activeIdx = -1;
+let openRequest = 0;
+let lintRequest = 0;
+const previousViews: { cx: number; cy: number; scale: number }[] = [];
+function rememberView() {
+  previousViews.push({ cx: view.cx, cy: view.cy, scale: view.scale });
+  if (previousViews.length > 40) previousViews.shift();
+  $<HTMLButtonElement>("#view-back").disabled = false;
+}
+function backView() {
+  const camera = previousViews.pop();
+  if (camera) { Object.assign(view, camera); view.viewRevision++; view.request(); }
+  $<HTMLButtonElement>("#view-back").disabled = !previousViews.length;
+}
 
 // ------------------------------------------------------------------ tabs
 
@@ -42,6 +55,9 @@ for (const nav of document.querySelectorAll<HTMLElement>(".tabs")) {
 function showTab(nav: HTMLElement | string, tab: string) {
   const n = typeof nav === "string" ? document.querySelector<HTMLElement>(`.tabs[data-for="${nav}"]`)! : nav;
   const side = n.parentElement!;
+  const id = side.id;
+  document.body.classList.remove(`${id}-hidden`);
+  $(`#toggle-${id}`).setAttribute("aria-expanded", "true");
   n.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x.dataset.tab === tab));
   side.querySelectorAll<HTMLElement>(".pane").forEach((p) => p.classList.toggle("on", p.dataset.pane === tab));
 }
@@ -57,12 +73,20 @@ function overlay(msg: string | null, kind: "" | "error" = "") {
 view.onView = () => {
   const px = 1 / view.scale;
   $("#zoom").textContent = `1 px = ${fmt(px, 4)} units`;
-  $("#perf").textContent = drawing ? `${drawing.prims.length.toLocaleString()} prims · ${view.lastTextCount} labels drawn · ${view.lastDrawMs.toFixed(0)} ms` : "";
+  $("#perf").textContent = drawing ? `${drawing.entities.length.toLocaleString()} entities · ${view.lastTextCount} labels` : "";
 };
 
 // ------------------------------------------------------------------ open
 
 async function open(path: string, opts: { hash?: string } = {}) {
+  const request = ++openRequest;
+  ++lintRequest;
+  packs = null;
+  lint = null;
+  visibleFindings = [];
+  activeIdx = -1;
+  previousViews.length = 0;
+  $<HTMLButtonElement>("#view-back").disabled = true;
   file = path;
   $<HTMLInputElement>("#path").value = path;
   const url = new URL(location.href);
@@ -77,7 +101,9 @@ async function open(path: string, opts: { hash?: string } = {}) {
     if (!res.ok) throw new Error((await res.json()).error ?? res.statusText);
     const serverMs = Number(res.headers.get("x-drawkit-ms") ?? 0);
     const cached = res.headers.get("x-drawkit-cached") === "true";
-    drawing = (await res.json()) as Drawing;
+    const loaded = (await res.json()) as Drawing;
+    if (request !== openRequest) return;
+    drawing = loaded;
     homeBox = null;
     byHandle = new Map(drawing.entities.map((e, i) => [e.h, i]));
     view.setDrawing(drawing);
@@ -87,10 +113,13 @@ async function open(path: string, opts: { hash?: string } = {}) {
     overlay(null);
     $("#perf").title = `server ${serverMs} ms (${cached ? "cached" : "converted"}), total ${(performance.now() - t0).toFixed(0)} ms`;
     document.title = `${path.split("/").pop()} — drawkit`;
-    await runLint();
+    const revision = view.viewRevision;
+    await runLint(revision);
+    if (request !== openRequest) return;
     applyHash();
     loadRecent();
   } catch (err: any) {
+    if (request !== openRequest) return;
     overlay(`Could not open: ${err.message ?? err}`, "error");
     $("#empty").classList.remove("hidden");
   }
@@ -219,12 +248,15 @@ for (const id of ["#recent", "#dir"])
 
 // ------------------------------------------------------------------ lint
 
-async function runLint() {
+async function runLint(initialRevision?: number) {
   if (!file) return;
+  const request = ++lintRequest;
   $("#findings").innerHTML = `<li class="hint">Linting…</li>`;
   const q = packs ? `&packs=${packs.join(",")}` : "";
   const res = await fetch(`/api/lint?file=${encodeURIComponent(file)}${q}`);
-  lint = await res.json();
+  const result = await res.json();
+  if (request !== lintRequest) return;
+  lint = result;
   if (!res.ok) {
     $("#findings").innerHTML = `<li class="hint">Lint failed: ${esc((lint as any).error)}</li>`;
     return;
@@ -238,18 +270,22 @@ async function runLint() {
   renderSheet();
   // a sheet frame is a better home view than percentile extents
   const frames = lint!.sheet.frames as { bbox: [number, number, number, number] }[];
-  if (frames.length && !view.selected.size && !view.activeFinding) {
+  if (frames.length) {
     homeBox = [Math.min(...frames.map((f) => f.bbox[0])), Math.min(...frames.map((f) => f.bbox[1])), Math.max(...frames.map((f) => f.bbox[2])), Math.max(...frames.map((f) => f.bbox[3]))];
-    view.fit(homeBox, 0.01);
+    if (initialRevision === view.viewRevision) view.fit(homeBox, 0.01);
   }
 }
 let homeBox: [number, number, number, number] | null = null;
-const home = () => (homeBox ? view.fit(homeBox, 0.01) : view.fit());
+const home = () => { if (!drawing) return; rememberView(); homeBox ? view.fit(homeBox, 0.01) : view.fit(); };
 $("#packs").addEventListener("change", () => {
   packs = [...document.querySelectorAll<HTMLInputElement>("#packs input:checked")].map((i) => i.dataset.pack!);
   runLint();
 });
-$("#relint").addEventListener("click", runLint);
+$("#relint").addEventListener("click", () => runLint());
+$("#all-markers").addEventListener("change", () => {
+  view.showAllFindings = $<HTMLInputElement>("#all-markers").checked;
+  view.request();
+});
 document.querySelectorAll<HTMLInputElement>(".sevs input").forEach((i) =>
   i.addEventListener("change", () => {
     sevOn[i.dataset.sev as Severity] = i.checked;
@@ -264,11 +300,12 @@ function renderFindings() {
   activeIdx = -1;
   view.activeFinding = null;
   const title = new Map(lint.rules.map((r) => [r.id, r]));
+  const numbers = new Map(lint.findings.map((f, i) => [f, i + 1]));
   $("#findings").innerHTML =
     visibleFindings
       .map(
         (f, i) =>
-          `<li data-i="${i}" title="${esc(title.get(f.rule)?.why ?? "")}"><span class="dot ${f.severity}"></span><span><span class="rule">${esc(f.rule)}</span> <span class="n">#${lint!.findings.indexOf(f) + 1}</span><span class="msg">${esc(f.message)}</span>${
+          `<li data-i="${i}" title="${esc(title.get(f.rule)?.why ?? "")}"><span class="dot ${f.severity}"></span><span><span class="rule">${esc(f.rule)}</span> <span class="n">#${numbers.get(f)}</span><span class="msg">${esc(f.message)}</span>${
             f.handles.length > 1 ? `<span class="n">${f.handles.length} entities</span>` : ""
           }</span></li>`,
       )
@@ -290,11 +327,14 @@ function focusFinding(i: number) {
   document.querySelectorAll("#findings li").forEach((li) => li.classList.toggle("on", Number((li as HTMLElement).dataset.i) === i));
   document.querySelector(`#findings li[data-i="${i}"]`)?.scrollIntoView({ block: "nearest" });
   const ents = f.handles.map((h) => byHandle.get(h)).filter((x): x is number => x !== undefined);
-  select(ents, false);
+  select(ents, false, false);
+  showTab("right", "findings");
   if (f.bbox) {
     const b = f.bbox;
     const w = b[2] - b[0], h = b[3] - b[1];
-    const m = Math.max(w, h) * 0.6 + 1;
+    const sheetSpan = homeBox ? Math.max(homeBox[2] - homeBox[0], homeBox[3] - homeBox[1]) : 0;
+    const m = Math.max(Math.max(w, h) * 0.6 + 1, sheetSpan * 0.005);
+    rememberView();
     view.fit([b[0] - m, b[1] - m, b[2] + m, b[3] + m], 0);
   }
   const url = new URL(location.href);
@@ -333,10 +373,10 @@ $("#sheet").addEventListener("click", (e) => {
 
 // ------------------------------------------------------------------ selection + inspect
 
-function select(ents: number[], zoom: boolean) {
+function select(ents: number[], zoom: boolean, revealInspector = true) {
   view.selected = new Set(ents);
   view.request();
-  if (ents.length === 1) inspect(ents[0]);
+  if (ents.length === 1 && revealInspector) inspect(ents[0]);
   if (zoom && ents.length) {
     const bs = ents.map((i) => drawing!.entities[i].bbox).filter(Boolean) as [number, number, number, number][];
     if (bs.length) {
@@ -345,6 +385,7 @@ function select(ents: number[], zoom: boolean) {
       const ext = homeBox ?? drawing!.entities.reduce((acc, e) => e.bbox ? [Math.min(acc[0], e.bbox[0]), Math.min(acc[1], e.bbox[1]), Math.max(acc[2], e.bbox[2]), Math.max(acc[3], e.bbox[3])] as [number, number, number, number] : acc, [Infinity, Infinity, -Infinity, -Infinity] as [number, number, number, number]);
       const span = Math.max(Math.max(b[2] - b[0], b[3] - b[1]) * 6, Math.max(ext[2] - ext[0], ext[3] - ext[1]) * 0.02);
       const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+      rememberView();
       view.fit([cx - span / 2, cy - span / 2, cx + span / 2, cy + span / 2], 0);
     }
   }
@@ -411,33 +452,52 @@ function applyHash() {
 // ------------------------------------------------------------------ canvas interaction
 
 const cv = view.canvas;
-let drag: { x: number; y: number; moved: boolean } | null = null;
+let drag: { x: number; y: number; moved: boolean; pointerId: number; button: number } | null = null;
+let cursor: { x: number; y: number } | null = null;
+let cursorFrame = 0;
+function updateCoordinates() {
+  if (cursorFrame) return;
+  cursorFrame = requestAnimationFrame(() => {
+    cursorFrame = 0;
+    if (!drawing || !cursor) return;
+    const r = cv.getBoundingClientRect();
+    const [x, y] = view.screenToWorld(cursor.x - r.left, cursor.y - r.top);
+    $("#coords").textContent = `x ${fmt(x, 3)}   y ${fmt(y, 3)}`;
+  });
+}
 cv.addEventListener("pointerdown", (e) => {
+  if (!drawing || (e.button !== 0 && e.button !== 1) || drag) return;
+  e.preventDefault();
+  cv.focus({ preventScroll: true });
   cv.setPointerCapture(e.pointerId);
-  drag = { x: e.clientX, y: e.clientY, moved: false };
+  drag = { x: e.clientX, y: e.clientY, moved: false, pointerId: e.pointerId, button: e.button };
 });
 cv.addEventListener("pointermove", (e) => {
-  const r = cv.getBoundingClientRect();
-  if (drawing) {
-    const [x, y] = view.screenToWorld(e.clientX - r.left, e.clientY - r.top);
-    $("#coords").textContent = `x ${fmt(x, 3)}   y ${fmt(y, 3)}`;
-  }
-  if (!drag) return;
+  cursor = { x: e.clientX, y: e.clientY };
+  updateCoordinates();
+  if (!drag || e.pointerId !== drag.pointerId) return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+  if (!drag.moved) {
+    rememberView();
+    cv.classList.add("panning");
+  }
   drag.moved = true;
-  cv.classList.add("panning");
   view.panBy(dx, dy);
   drag.x = e.clientX;
   drag.y = e.clientY;
 });
 cv.addEventListener("pointerup", (e) => {
+  if (!drag || e.pointerId !== drag.pointerId) return;
   cv.classList.remove("panning");
   const wasDrag = drag?.moved;
+  const button = drag.button;
   drag = null;
-  if (wasDrag || !drawing) return;
+  if (cv.hasPointerCapture(e.pointerId)) cv.releasePointerCapture(e.pointerId);
+  if (wasDrag || button !== 0 || !drawing) return;
   const r = cv.getBoundingClientRect();
   const ent = view.pick(e.clientX - r.left, e.clientY - r.top);
+  view.activeFinding = null;
   if (ent === null) {
     view.selected.clear();
     view.request();
@@ -445,20 +505,51 @@ cv.addEventListener("pointerup", (e) => {
   }
   select([ent], false);
 });
+const cancelDrag = () => { drag = null; cv.classList.remove("panning"); };
+cv.addEventListener("pointercancel", cancelDrag);
+cv.addEventListener("lostpointercapture", cancelDrag);
+cv.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });
+let wheelUntil = 0;
 cv.addEventListener(
   "wheel",
   (e) => {
     e.preventDefault();
+    if (!drawing) return;
+    if (performance.now() > wheelUntil) rememberView();
+    wheelUntil = performance.now() + 250;
     const r = cv.getBoundingClientRect();
-    const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015));
+    const pixels = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? view.height : 1);
+    const factor = Math.exp(-Math.max(-400, Math.min(400, pixels)) * 0.002);
     view.zoomAt(e.clientX - r.left, e.clientY - r.top, factor);
   },
   { passive: false },
 );
 cv.addEventListener("dblclick", () => home());
+$("#fit").addEventListener("click", home);
+$("#view-back").addEventListener("click", backView);
+for (const [id, factor] of [["#zoom-in", 1.5], ["#zoom-out", 1 / 1.5]] as const)
+  $(id).addEventListener("click", () => {
+    if (!drawing) return;
+    rememberView();
+    view.zoomAt(view.width / 2, view.height / 2, factor);
+  });
+for (const side of ["left", "right"] as const) {
+  const button = $(`#toggle-${side}`);
+  button.addEventListener("click", () => {
+    const hidden = document.body.classList.toggle(`${side}-hidden`);
+    button.setAttribute("aria-expanded", String(!hidden));
+  });
+}
+if (innerWidth <= 820) {
+  document.body.classList.add("left-hidden", "right-hidden");
+  $("#toggle-left").setAttribute("aria-expanded", "false");
+  $("#toggle-right").setAttribute("aria-expanded", "false");
+}
 
 window.addEventListener("keydown", (e) => {
-  if ((e.target as HTMLElement).tagName === "INPUT") return;
+  if ((e.target as HTMLElement).closest("input, textarea, select, [contenteditable=true]")) return;
+  if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); backView(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === "f" || e.key === "F") home();
   else if (e.key === "Escape") {
     view.selected.clear();
@@ -468,6 +559,8 @@ window.addEventListener("keydown", (e) => {
   else if (e.key === "k" || e.key === "p") focusFinding(Math.max(0, activeIdx - 1));
   else if (e.key === "/") {
     e.preventDefault();
+    document.body.classList.remove("left-hidden");
+    $("#toggle-left").setAttribute("aria-expanded", "true");
     showTab("left", "search");
     $<HTMLInputElement>("#search").focus();
   }
@@ -488,7 +581,7 @@ window.addEventListener("keydown", (e) => {
     focusFinding(visibleFindings.indexOf(f));
     return true;
   },
-  state: () => ({ file, entities: drawing?.entities.length ?? 0, findings: lint?.findings.length ?? 0, drawMs: view.lastDrawMs, labels: view.lastTextCount }),
+  state: () => ({ file, ready: Boolean(lint?.findings), entities: drawing?.entities.length ?? 0, findings: lint?.findings.length ?? 0, drawMs: view.lastDrawMs, labels: view.lastTextCount }),
 };
 
 const initial = new URL(location.href).searchParams.get("file");

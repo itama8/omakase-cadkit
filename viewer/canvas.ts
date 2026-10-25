@@ -28,6 +28,7 @@ interface Batch {
   color: string;
   kind: "stroke" | "fillSolid" | "fillPattern" | "dot";
   path: Path2D;
+  maxSize: number; // upper bound on primitive size in this batch; enables subpixel culling
 }
 
 interface Tile {
@@ -35,6 +36,14 @@ interface Tile {
   batches: Batch[];
   texts: number[]; // prim indexes
 }
+
+interface RasterTile {
+  canvas: HTMLCanvasElement;
+  labels: number;
+}
+
+const RASTER_SIZE = 256;
+const RASTER_BLEED = 3;
 
 type Rgb = number;
 
@@ -60,6 +69,7 @@ export class DrawingCanvas {
   private entPrims: number[][] = [];
   private hitGrid = new Map<string, number[]>();
   private hitCell = 1;
+  private extents: Bbox = [0, 0, 1, 1];
   hiddenLayers = new Set<number>();
   /** view: screen = (rel - centre) * scale + half size; y up */
   cx = 0;
@@ -68,11 +78,18 @@ export class DrawingCanvas {
   selected = new Set<number>(); // entity indexes
   findings: Finding[] = [];
   activeFinding: Finding | null = null;
+  showAllFindings = false;
   onView: (() => void) | null = null;
   private dpr = 1;
   private raf = 0;
+  private rasters = new Map<string, RasterTile>();
+  private sceneKey = "";
+  private rasterOriginX = 0;
+  private rasterOriginY = 0;
+  private drawingVersion = 0;
   lastDrawMs = 0;
   lastTextCount = 0;
+  viewRevision = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -99,6 +116,7 @@ export class DrawingCanvas {
   // ------------------------------------------------------------------ loading
 
   setDrawing(d: Drawing) {
+    this.drawingVersion++;
     this.drawing = d;
     this.selected.clear();
     this.findings = [];
@@ -112,6 +130,7 @@ export class DrawingCanvas {
       this.entPrims[d.prims[i][1]]?.push(i);
     }
     this.primBox = box;
+    this.extents = this.extentsRel();
     this.buildTiles();
     this.buildHitGrid();
     this.fit();
@@ -135,8 +154,8 @@ export class DrawingCanvas {
 
   private buildTiles() {
     const d = this.drawing!;
-    const ext = this.extentsRel();
-    const N = 16;
+    const ext = this.extents;
+    const N = 32;
     const w = Math.max(ext[2] - ext[0], 1e-9) / N, h = Math.max(ext[3] - ext[1], 1e-9) / N;
     const tileIdx = (i: number) => {
       const b = this.primBox.subarray(i * 4, i * 4 + 4);
@@ -159,10 +178,12 @@ export class DrawingCanvas {
       }
       const kind: Batch["kind"] = p[0] === "f" ? (p[4] ? "fillSolid" : "fillPattern") : p[0] === "d" ? "dot" : "stroke";
       const color = cssColor(p[3], this.theme);
-      const key = `${p[2]}|${color}|${kind}`;
+      const size = Math.max(b[2] - b[0], b[3] - b[1], 1e-12);
+      const maxSize = p[0] === "d" ? Infinity : 2 ** Math.ceil(Math.log2(size));
+      const key = `${p[2]}|${color}|${kind}|${maxSize}`;
       let batch = batchMaps[t].get(key);
       if (!batch) {
-        batch = { layer: p[2], color, kind, path: new Path2D() };
+        batch = { layer: p[2], color, kind, maxSize, path: new Path2D() };
         batchMaps[t].set(key, batch);
         tile.batches.push(batch);
       }
@@ -172,7 +193,7 @@ export class DrawingCanvas {
   }
 
   private buildHitGrid() {
-    const ext = this.extentsRel();
+    const ext = this.extents;
     this.hitCell = Math.max(ext[2] - ext[0], ext[3] - ext[1], 1e-6) / 256;
     const g = new Map<string, number[]>();
     const n = this.drawing!.prims.length;
@@ -199,11 +220,12 @@ export class DrawingCanvas {
   // ------------------------------------------------------------------ view
 
   fit(b?: Bbox, pad = 0.04) {
-    const r = b ? this.toRel(b) : this.extentsRel();
+    const r = b ? this.toRel(b) : this.extents;
     const w = Math.max(r[2] - r[0], 1e-9), h = Math.max(r[3] - r[1], 1e-9);
     this.cx = (r[0] + r[2]) / 2;
     this.cy = (r[1] + r[3]) / 2;
     this.scale = Math.min(this.width / (w * (1 + 2 * pad)), this.height / (h * (1 + 2 * pad)));
+    this.viewRevision++;
     this.request();
   }
 
@@ -229,16 +251,18 @@ export class DrawingCanvas {
 
   zoomAt(sx: number, sy: number, factor: number) {
     const [x, y] = this.screenToRel(sx, sy);
-    this.scale *= factor;
+    this.scale = Math.max(1e-7, Math.min(1e7, this.scale * factor));
     // keep the point under the cursor fixed
     this.cx = x - (sx - this.width / 2) / this.scale;
     this.cy = y + (sy - this.height / 2) / this.scale;
+    this.viewRevision++;
     this.request();
   }
 
   panBy(dx: number, dy: number) {
     this.cx -= dx / this.scale;
     this.cy += dy / this.scale;
+    this.viewRevision++;
     this.request();
   }
 
@@ -257,8 +281,15 @@ export class DrawingCanvas {
     const tol = tolPx / this.scale;
     const c = this.hitCell;
     const cand = new Set<number>(this.hitGrid.get("big") ?? []);
-    for (let gx = Math.floor((x - tol) / c); gx <= Math.floor((x + tol) / c); gx++)
-      for (let gy = Math.floor((y - tol) / c); gy <= Math.floor((y + tol) / c); gy++) for (const i of this.hitGrid.get(gx + "," + gy) ?? []) cand.add(i);
+    const gx0 = Math.floor((x - tol) / c), gx1 = Math.floor((x + tol) / c);
+    const gy0 = Math.floor((y - tol) / c), gy1 = Math.floor((y + tol) / c);
+    // At extreme zoom-out, scanning empty grid cells can otherwise freeze the tab.
+    if ((gx1 - gx0 + 1) * (gy1 - gy0 + 1) > 4096) {
+      for (let i = 0; i < this.drawing.prims.length; i++) cand.add(i);
+    } else {
+      for (let gx = gx0; gx <= gx1; gx++)
+        for (let gy = gy0; gy <= gy1; gy++) for (const i of this.hitGrid.get(gx + "," + gy) ?? []) cand.add(i);
+    }
     let best: number | null = null, bd = Infinity, barea = Infinity;
     for (const i of cand) {
       const p = this.drawing.prims[i];
@@ -304,20 +335,80 @@ export class DrawingCanvas {
     if (!d) return;
     const vis = this.visibleRel();
     const s = this.scale;
-    const tx = this.width / 2 - this.cx * s, ty = this.height / 2 + this.cy * s;
-    const world = () => ctx.setTransform(this.dpr * s, 0, 0, -this.dpr * s, this.dpr * tx, this.dpr * ty);
     const screen = () => ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    const onScreen = (b: Bbox) => b[0] <= vis[2] && b[2] >= vis[0] && b[1] <= vis[3] && b[3] >= vis[1];
+    const onScreen = (b: ArrayLike<number>) => b[0] <= vis[2] && b[2] >= vis[0] && b[1] <= vis[3] && b[3] >= vis[1];
+
+    // Anchor raster tiles to drawing space at this scale. Long pans render only newly
+    // exposed tiles; crossing a cache boundary never repaints the whole viewport.
+    const left = this.cx * s - this.width / 2, top = -this.cy * s - this.height / 2;
+    const key = `${this.drawingVersion}|${this.canvas.width}|${this.canvas.height}|${this.dpr}|${s}|${[...this.hiddenLayers].sort().join(",")}|${[...this.selected].join(",")}|${JSON.stringify(theme)}`;
+    if (key !== this.sceneKey) {
+      for (const tile of this.rasters.values()) tile.canvas.width = tile.canvas.height = 1;
+      this.rasters.clear();
+      this.sceneKey = key;
+      // Align the initial grid to the viewport so a fresh fit/zoom keeps text sharp.
+      this.rasterOriginX = left;
+      this.rasterOriginY = top;
+    }
+    const x0 = Math.floor((left - this.rasterOriginX) / RASTER_SIZE), x1 = Math.ceil((left - this.rasterOriginX + this.width) / RASTER_SIZE) - 1;
+    const y0 = Math.floor((top - this.rasterOriginY) / RASTER_SIZE), y1 = Math.ceil((top - this.rasterOriginY + this.height) / RASTER_SIZE) - 1;
+    const visible = new Set<string>();
+    let labels = 0;
+    for (let y = y0; y <= y1; y++)
+      for (let x = x0; x <= x1; x++) {
+        const id = `${x},${y}`;
+        const tileLeft = this.rasterOriginX + x * RASTER_SIZE, tileTop = this.rasterOriginY + y * RASTER_SIZE;
+        visible.add(id);
+        let tile = this.rasters.get(id);
+        if (!tile) tile = this.renderRaster(tileLeft, tileTop);
+        // Refresh insertion order for bounded LRU eviction after compositing.
+        this.rasters.delete(id);
+        this.rasters.set(id, tile);
+        labels += tile.labels;
+        ctx.drawImage(tile.canvas, tileLeft - left - RASTER_BLEED, tileTop - top - RASTER_BLEED, tile.canvas.width / this.dpr, tile.canvas.height / this.dpr);
+      }
+    this.lastTextCount = labels;
+    // About 64 MB of raster pixels, allowing at least the current viewport on large screens.
+    const limit = Math.max(visible.size, Math.floor(16_000_000 / Math.ceil((RASTER_SIZE + 2 * RASTER_BLEED) * this.dpr) ** 2));
+    for (const id of this.rasters.keys()) {
+      if (this.rasters.size <= limit) break;
+      if (!visible.has(id)) {
+        const tile = this.rasters.get(id)!;
+        tile.canvas.width = tile.canvas.height = 1;
+        this.rasters.delete(id);
+      }
+    }
+
+    this.drawOverlays(ctx, screen, onScreen);
+    this.lastDrawMs = performance.now() - t0;
+    this.onView?.();
+  }
+
+  private renderRaster(left: number, top: number): RasterTile {
+    const margin = RASTER_BLEED;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = Math.ceil((RASTER_SIZE + 2 * margin) * this.dpr);
+    const ctx = canvas.getContext("2d")!;
+    const { theme } = this;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = theme.bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const d = this.drawing!;
+    const s = this.scale;
+    const vis = [(left - margin) / s, -(top + RASTER_SIZE + margin) / s, (left + RASTER_SIZE + margin) / s, -(top - margin) / s];
+    const onScreen = (b: ArrayLike<number>) => b[0] <= vis[2] && b[2] >= vis[0] && b[1] <= vis[3] && b[3] >= vis[1];
+    const world = () => ctx.setTransform(this.dpr * s, 0, 0, -this.dpr * s, this.dpr * (margin - left), this.dpr * (margin - top));
+    const screen = () => ctx.setTransform(this.dpr, 0, 0, this.dpr, this.dpr * (this.cx * s - this.width / 2 - left + margin), this.dpr * (-this.cy * s - this.height / 2 - top + margin));
 
     world();
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
+    ctx.lineJoin = "bevel";
+    ctx.lineCap = "butt";
     const visTiles = this.tiles.filter((t) => onScreen(t.bbox));
     // fills first, then strokes, then dots
     for (const pass of ["fillPattern", "fillSolid", "stroke", "dot"] as const)
       for (const t of visTiles)
         for (const b of t.batches) {
-          if (b.kind !== pass || this.hiddenLayers.has(b.layer)) continue;
+          if (b.kind !== pass || this.hiddenLayers.has(b.layer) || b.maxSize * s < 0.75) continue;
           if (pass === "stroke") {
             ctx.strokeStyle = b.color;
             ctx.lineWidth = 1 / s;
@@ -357,8 +448,14 @@ export class DrawingCanvas {
         ctx.restore();
         nText++;
       }
-    this.lastTextCount = nText;
+    this.drawSelection(ctx, world, screen, onScreen);
+    return { canvas, labels: nText };
+  }
 
+  private drawSelection(ctx: CanvasRenderingContext2D, world: () => void, screen: () => void, onScreen: (b: ArrayLike<number>) => boolean) {
+    const d = this.drawing!;
+    const { theme } = this;
+    const s = this.scale;
     // selection
     if (this.selected.size) {
       world();
@@ -367,6 +464,9 @@ export class DrawingCanvas {
       for (const e of this.selected)
         for (const i of this.entPrims[e] ?? []) {
           const p = d.prims[i];
+          const b = this.primBox.subarray(i * 4, i * 4 + 4);
+          if (this.hiddenLayers.has(p[2]) || !onScreen(b)) continue;
+          if (Math.max(b[2] - b[0], b[3] - b[1]) * s < 0.375 && p[0] !== "d") continue;
           if (p[0] === "f") addPrimToPath(fill, p);
           else if (p[0] !== "t") addPrimToPath(path, p);
         }
@@ -395,11 +495,16 @@ export class DrawingCanvas {
       }
     }
 
+  }
+
+  private drawOverlays(ctx: CanvasRenderingContext2D, screen: () => void, onScreen: (b: ArrayLike<number>) => boolean) {
+    const { theme } = this;
     // findings
     screen();
     for (const f of this.findings) {
       if (!f.bbox) continue;
       const active = f === this.activeFinding;
+      if (!active && !this.showAllFindings) continue;
       if (!active && this.findings.length > 400) continue;
       const r = this.toRel(f.bbox);
       if (!onScreen(r)) continue;
@@ -424,8 +529,6 @@ export class DrawingCanvas {
       ctx.setLineDash([]);
       ctx.globalAlpha = 1;
     }
-    this.lastDrawMs = performance.now() - t0;
-    this.onView?.();
   }
 }
 

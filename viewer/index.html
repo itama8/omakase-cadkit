@@ -44,7 +44,16 @@
     </aside>
 
     <main id="stage">
-      <canvas id="canvas"></canvas>
+      <canvas id="canvas" tabindex="0" aria-label="Drawing. Drag to pan, wheel to zoom, F to fit, Escape to clear selection."></canvas>
+      <div id="view-tools" role="toolbar" aria-label="Drawing navigation">
+        <button id="toggle-left" aria-label="Toggle layers and files" aria-expanded="true">Layers / Files</button>
+        <button id="view-back" title="Previous view (Alt + Left)" disabled>Back</button>
+        <button id="fit" title="Fit sheet (F)">Fit</button>
+        <button id="zoom-out" aria-label="Zoom out">−</button>
+        <button id="zoom-in" aria-label="Zoom in">+</button>
+        <button id="toggle-right" aria-label="Toggle review panel" aria-expanded="true">Review</button>
+      </div>
+      <div id="navigation-hint">Drag to pan · Wheel to zoom · F to fit</div>
       <div id="overlay" class="overlay hidden"></div>
       <div id="empty" class="empty">
         <h1>Open a DWG or DXF</h1>
@@ -69,6 +78,7 @@
           <label><input type="checkbox" data-sev="warning" checked /> <span class="dot warning"></span><span id="n-warning">0</span></label>
           <label><input type="checkbox" data-sev="info" /> <span class="dot info"></span><span id="n-info">0</span></label>
         </div>
+        <label class="hint marker-toggle"><input id="all-markers" type="checkbox" /> Show all finding markers</label>
         <div id="profile" class="hint"></div>
         <ol id="findings" class="list findings"></ol>
       </section>
