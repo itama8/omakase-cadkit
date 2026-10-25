@@ -31,13 +31,28 @@ try {
                 $archive = Join-Path $temp $parts[1]
                 Invoke-WebRequest -UseBasicParsing "$base/$($parts[1])" -OutFile $archive
                 if ((Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant() -ne $parts[0]) { throw 'Node checksum mismatch.' }
-                Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $temp 'unpacked')
-                $unpacked = Get-ChildItem -Directory -LiteralPath (Join-Path $temp 'unpacked') | Select-Object -First 1
-                if (-not (Test-Node (Join-Path $unpacked.FullName 'node.exe'))) { throw 'Downloaded Node cannot run on this OS.' }
+                $unpackedDir = Join-Path $temp 'unpacked'
+                New-Item -ItemType Directory -Force $unpackedDir | Out-Null
+                # tar.exe ships with Windows and leaves no open handles; Expand-Archive can.
+                if (Get-Command tar.exe -ErrorAction SilentlyContinue) {
+                    & tar.exe -xf $archive -C $unpackedDir
+                    if ($LASTEXITCODE -ne 0) { throw 'Could not extract the Node download.' }
+                } else {
+                    Expand-Archive -LiteralPath $archive -DestinationPath $unpackedDir
+                }
+                $unpacked = Get-ChildItem -Directory -LiteralPath $unpackedDir | Select-Object -First 1
                 $target = Join-Path $tools 'node'
                 if (Test-Path -LiteralPath $target) { Remove-Item -Recurse -Force -LiteralPath $target }
-                Move-Item -LiteralPath $unpacked.FullName -Destination $target
+                # Move before running node.exe: an antivirus scan of a just-run image can hold
+                # the directory open and fail the move with "Access to the path is denied".
+                $moved = $false
+                foreach ($attempt in 1..5) {
+                    try { Move-Item -LiteralPath $unpacked.FullName -Destination $target; $moved = $true; break }
+                    catch { if ($attempt -eq 5) { throw }; Start-Sleep -Seconds $attempt }
+                }
+                if (-not $moved) { throw 'Could not place the Node download.' }
                 $node = Join-Path $target 'node.exe'
+                if (-not (Test-Node $node)) { throw 'Downloaded Node cannot run on this OS.' }
             } finally { Remove-Item -Recurse -Force -LiteralPath $temp }
         }
     }

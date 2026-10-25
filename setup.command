@@ -36,10 +36,10 @@ if ! node_ok "$node_bin" || [[ ! -f "$root/.tools/node/lib/node_modules/npm/bin/
     [[ "${actual%% *}" == "$checksum" ]] || { echo 'Node checksum mismatch.' >&2; exit 1; }
     mkdir "$temp/unpacked"
     tar -xzf "$temp/$archive" -C "$temp/unpacked" --strip-components=1
-    node_ok "$temp/unpacked/bin/node" || { echo 'Downloaded Node cannot run on this OS.' >&2; exit 1; }
     rm -rf -- "$root/.tools/node"
     mv "$temp/unpacked" "$root/.tools/node"
     node_bin="$root/.tools/node/bin/node"
+    node_ok "$node_bin" || { echo 'Downloaded Node cannot run on this OS.' >&2; exit 1; }
     rm -rf -- "$temp"
     trap - EXIT
   fi
