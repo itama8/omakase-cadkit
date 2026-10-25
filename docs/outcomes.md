@@ -8,12 +8,12 @@ handoffs live in [devlogs](../.devlog/README.md). Updated 2026-10-25.
 | ID | Desired outcome | State | Evidence needed to call it done | Next action |
 |---|---|---|---|---|
 | O1 | A newcomer or their agent can set up a source checkout and inspect a synthetic drawing without private files or Omakase context. | done (Linux x64) | Fresh source-directory setup passed with installed prerequisites; inspect, clean/bad lint, SVG render, and Chromium viewer checks passed. [Evidence](../.devlog/2026-10-25-s01.md). | Use [setup](setup.md); move to O2. Other platforms remain unverified. |
+| O2 | Someone outside the project can understand, reuse, and contribute to a public repository. | done (Linux x64 CI) | MIT license and dependency notices exist; contributor and agent entry points work; a clean-checkout CI run and public repository metadata are confirmed. | Public repository is live with a green, annotation-free CI run and a scrubbed history; contamination checks on a fresh clone found no client name. Start O3. [Evidence](../.devlog/2026-10-25-s03.md). |
 
 ## Next
 
 | ID | Desired outcome | State | Evidence needed to call it done | Next action |
 |---|---|---|---|---|
-| O2 | Someone outside the project can understand, reuse, and contribute to a public repository. | verifying | MIT license and dependency notices exist; contributor and agent entry points work; a clean-checkout CI run and public repository metadata are confirmed. | Local CI preparation is done and lint-clean; create `itama8/omakase-cadkit`, push, and read the first CI run. [Evidence](../.devlog/2026-10-25-s02.md). |
 | O3 | Another application can use a small documented library API without depending on the CLI or viewer. | queued | A separate consumer opens a fixture, inspects entities, lints, renders SVG, and closes the sidecar through documented exports and types; errors and process ownership are explicit. | Select the smallest API from those real calls, then prove it in a separate consumer. |
 
 ## After those
@@ -42,4 +42,4 @@ Borrowed from Omakase: read current state before deeper history, separate accept
 from implementation, choose a runnable next action, and keep evidence in devlogs.
 This repository has no dependency on Omakase's skills, plans, or tooling.
 
-Latest evidence: [2026-10-25-s02](../.devlog/2026-10-25-s02.md).
+Latest evidence: [2026-10-25-s03](../.devlog/2026-10-25-s03.md).
