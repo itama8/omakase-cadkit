@@ -92,6 +92,11 @@ export class Sidecar {
     }
   }
 
+  /** True while a worker process exists. A stopped or crashed sidecar is false. */
+  get alive(): boolean {
+    return this.proc !== null && this.proc.exitCode === null;
+  }
+
   request<T = any>(method: string, params: Record<string, unknown> = {}, timeoutMs = 120_000): Promise<T> {
     const proc = this.start();
     const id = this.nextId++;

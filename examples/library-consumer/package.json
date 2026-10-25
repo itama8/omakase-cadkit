@@ -1,0 +1,17 @@
+{
+  "name": "omakase-cadkit-library-consumer",
+  "private": true,
+  "type": "module",
+  "description": "Example: use omakase-cadkit as a library, without the CLI or viewer.",
+  "scripts": {
+    "start": "node consumer.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "omakase-cadkit": "file:../.."
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

@@ -44,3 +44,7 @@ jobs:
         run: npm run smoke
         env:
           OMAKASE_CADKIT_CACHE: ${{ runner.temp }}/omakase-cadkit-cache
+      - name: Exercise the library from a separate consumer
+        run: npm run consumer
+        env:
+          OMAKASE_CADKIT_CACHE: ${{ runner.temp }}/omakase-cadkit-consumer-cache

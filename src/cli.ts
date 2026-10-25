@@ -6,11 +6,12 @@ import path from "node:path";
 import { loadConfig } from "./config.ts";
 import { padBbox, unionBbox } from "./geometry.ts";
 import { lintSet, makeContext, RULES, SET_RULES, type LintResult } from "./lint/engine.ts";
+import { entityMatcher, type EntityFilter } from "./query.ts";
 import { sewerNetwork } from "./lint/sewer.ts";
 import { renderSvg } from "./render-svg.ts";
 import { workingScale } from "./sheet.ts";
 import { DrawingStore } from "./store.ts";
-import type { Bbox, Entity, Finding } from "./types.ts";
+import type { Bbox, Finding } from "./types.ts";
 
 const HELP = `omakase-cadkit — view, inspect and lint DWG/DXF drawings
 
@@ -113,33 +114,26 @@ async function cmdInspect(store: DrawingStore, file: string, flags: Flags) {
   if (Object.keys(d.unrendered).length) console.log(`not drawn ${Object.entries(d.unrendered).map(([k, v]) => `${k} ${v}`).join(", ")}`);
 }
 
-function matches(ctx: ReturnType<typeof makeContext>, e: Entity, flags: Flags): boolean {
-  const t = str(flags, "type");
-  if (t && !t.split(",").some((x) => x.toUpperCase() === e.type)) return false;
-  const l = str(flags, "layer");
-  if (l && !l.split(",").some((x) => x.toLowerCase() === ctx.layerName(e).toLowerCase())) return false;
-  const b = str(flags, "block");
-  if (b && !(e.block && b.split(",").some((x) => x.toLowerCase() === e.block!.toLowerCase()))) return false;
-  const h = str(flags, "handle");
-  if (h && !h.split(",").some((x) => x.toUpperCase() === e.h)) return false;
-  const tx = str(flags, "text");
-  if (tx && !(e.text !== undefined && new RegExp(tx, "i").test(e.text))) return false;
+function entityFilter(flags: Flags): EntityFilter {
+  const list = (key: string) => str(flags, key)?.split(",").filter(Boolean);
   const near = str(flags, "near");
-  if (near) {
-    const [x, y, r] = near.split(",").map(Number);
-    if (!e.bbox) return false;
-    const cx = Math.max(e.bbox[0], Math.min(x, e.bbox[2])), cy = Math.max(e.bbox[1], Math.min(y, e.bbox[3]));
-    if (Math.hypot(cx - x, cy - y) > r) return false;
-  }
-  return true;
+  return {
+    type: list("type"),
+    layer: list("layer"),
+    block: list("block"),
+    handle: list("handle"),
+    text: str(flags, "text"),
+    near: near ? (near.split(",").map(Number) as [number, number, number]) : undefined,
+  };
 }
 
 async function cmdQuery(store: DrawingStore, file: string, flags: Flags) {
   const ctx = await openWithCtx(store, file, flags);
   const limit = Number(str(flags, "limit") ?? 200);
   let n = 0, total = 0;
+  const match = entityMatcher(entityFilter(flags), ctx.layerName);
   for (const e of ctx.drawing.entities) {
-    if (!matches(ctx, e, flags)) continue;
+    if (!match(e)) continue;
     total++;
     if (n < limit) {
       console.log(JSON.stringify({ ...e, layer: ctx.layerName(e) }));

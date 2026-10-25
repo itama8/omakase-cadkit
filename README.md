@@ -79,6 +79,43 @@ server and run:
 node scripts/shot.mjs 'http://127.0.0.1:4280/?file=/absolute/path/to/drawing.dwg' /tmp/viewer.png 1500 900 --check
 ```
 
+## Library
+
+Another program can open, inspect, lint, and render a drawing without the CLI or viewer:
+
+```ts
+import { Cadkit } from "omakase-cadkit";
+
+const kit = new Cadkit();
+try {
+  const dwg = await kit.open("drawing.dwg");
+  const pipes = dwg.entities({ type: ["LINE", "LWPOLYLINE"], layer: ["SEWER"] });
+  const result = dwg.lint({ packs: ["common", "sewer"] });
+  const svg = dwg.render({ findings: result.findings, width: 1200 });
+} finally {
+  kit.close();
+}
+```
+
+The entry point is `src/index.ts`, published as the package's `exports` and `types`:
+`Cadkit`, `CadkitError`, `entityMatcher`, and the payload, config, lint, sheet, and SVG types.
+Deep imports under `src/` are internal and can change.
+
+- **Process ownership:** a new `Cadkit` starts nothing. The first uncached `open()` spawns one
+  sidecar, later opens reuse it, and `close()` stops it. `running` reports whether it is
+  alive; `closed` reports whether this instance still accepts opens. A returned drawing owns
+  parsed data, not the process, so it keeps linting and rendering after `close()`.
+- **Errors:** `open()` throws for a missing file, a non-DWG/DXF file, an unbuilt sidecar, a
+  crash, or a timeout, and the message names the cause. A rule that throws is reported in
+  `LintResult.ruleErrors` instead of failing the lint.
+- **Cache:** set `OMAKASE_CADKIT_CACHE` before importing the package to move the payload cache.
+
+[`examples/library-consumer/`](examples/library-consumer/consumer.ts) is a separate package
+that depends on this one and exercises every step above; `npm run consumer` installs it,
+typechecks it, and runs it. It imports TypeScript sources through the package entry, so it
+needs Node 23.6 or newer type stripping. A compiled distribution is tracked in
+[outcomes](docs/outcomes.md) as O4.
+
 ## Project profile
 
 An `omakase-cadkit.json` in the drawing's folder or any parent sets what the file cannot say about
@@ -121,8 +158,11 @@ src/store.ts            payload cache (disk + memory)
 src/sheet.ts            units, frames, declared/measured scale, drawing number
 src/lint/               engine, common pack, sewer pack (network rebuild)
 src/render-svg.ts       region -> SVG for agents
+src/query.ts            entity filters shared by `query` and the library
+src/index.ts            public library entry: Cadkit, DrawingHandle
 src/cli.ts, server.ts   CLI and loopback viewer server
 viewer/                 canvas renderer and UI, no framework
+examples/library-consumer/  separate package that uses only the public library API
 fixtures/               generator for synthetic drawings with planted defects
 test/                   end-to-end tests (+ a local real-drawing regression)
 skills/omakase-cadkit/         agent skill for using omakase-cadkit on drawings

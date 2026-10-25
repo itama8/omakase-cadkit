@@ -8,6 +8,13 @@
     "omakase-cadkit": "bin/omakase-cadkit.mjs",
     "drawkit": "bin/drawkit.mjs"
   },
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
   "engines": {
     "node": ">=23.6"
   },
@@ -19,7 +26,8 @@
     "test": "node --test test/*.test.ts",
     "fixtures": "uv run --quiet --with ezdxf --python 3.13 python -I fixtures/make_fixtures.py fixtures",
     "setup": "node scripts/setup.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "consumer": "npm --prefix examples/library-consumer install --no-audit --no-fund --silent && npm --prefix examples/library-consumer run typecheck --silent && npm --prefix examples/library-consumer start --silent"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
