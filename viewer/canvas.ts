@@ -29,6 +29,7 @@ interface Batch {
   kind: "stroke" | "fillSolid" | "fillPattern" | "dot";
   path: Path2D;
   maxSize: number; // upper bound on primitive size in this batch; enables subpixel culling
+  dots: number[];
 }
 
 interface Tile {
@@ -82,6 +83,7 @@ export class DrawingCanvas {
   onView: (() => void) | null = null;
   private dpr = 1;
   private raf = 0;
+  private zoomMotion: { x: number; y: number; scale: number; time: number } | null = null;
   private rasters = new Map<string, RasterTile>();
   private sceneKey = "";
   private rasterOriginX = 0;
@@ -168,6 +170,7 @@ export class DrawingCanvas {
     const tiles: Tile[] = Array.from({ length: N * N + 1 }, () => ({ bbox: [Infinity, Infinity, -Infinity, -Infinity] as Bbox, batches: [], texts: [] }));
     const batchMaps: Map<string, Batch>[] = tiles.map(() => new Map());
     d.prims.forEach((p, i) => {
+      if (this.isDefinitionPoint(p)) return;
       const t = tileIdx(i);
       const tile = tiles[t];
       const b = this.primBox.subarray(i * 4, i * 4 + 4);
@@ -183,11 +186,12 @@ export class DrawingCanvas {
       const key = `${p[2]}|${color}|${kind}|${maxSize}`;
       let batch = batchMaps[t].get(key);
       if (!batch) {
-        batch = { layer: p[2], color, kind, maxSize, path: new Path2D() };
+        batch = { layer: p[2], color, kind, maxSize, path: new Path2D(), dots: [] };
         batchMaps[t].set(key, batch);
         tile.batches.push(batch);
       }
-      addPrimToPath(batch.path, p);
+      if (p[0] === "d") batch.dots.push(p[4], p[5]);
+      else addPrimToPath(batch.path, p);
     });
     this.tiles = tiles.filter((t) => t.batches.length || t.texts.length);
   }
@@ -198,6 +202,7 @@ export class DrawingCanvas {
     const g = new Map<string, number[]>();
     const n = this.drawing!.prims.length;
     for (let i = 0; i < n; i++) {
+      if (this.isDefinitionPoint(this.drawing!.prims[i])) continue;
       const b = this.primBox.subarray(i * 4, i * 4 + 4);
       const x0 = Math.floor(b[0] / this.hitCell), x1 = Math.floor(b[2] / this.hitCell), y0 = Math.floor(b[1] / this.hitCell), y1 = Math.floor(b[3] / this.hitCell);
       if ((x1 - x0 + 1) * (y1 - y0 + 1) > 2048) {
@@ -220,6 +225,7 @@ export class DrawingCanvas {
   // ------------------------------------------------------------------ view
 
   fit(b?: Bbox, pad = 0.04) {
+    this.cancelZoom();
     const r = b ? this.toRel(b) : this.extents;
     const w = Math.max(r[2] - r[0], 1e-9), h = Math.max(r[3] - r[1], 1e-9);
     this.cx = (r[0] + r[2]) / 2;
@@ -250,16 +256,36 @@ export class DrawingCanvas {
   }
 
   zoomAt(sx: number, sy: number, factor: number) {
+    this.cancelZoom();
+    this.applyZoom(sx, sy, factor);
+    this.request();
+  }
+
+  /** Accumulate wheel input and ease towards it, preserving the cursor anchor. */
+  smoothZoomAt(sx: number, sy: number, factor: number) {
+    this.zoomMotion = {
+      x: sx, y: sy,
+      scale: Math.max(1e-7, Math.min(1e7, (this.zoomMotion?.scale ?? this.scale) * factor)),
+      time: this.zoomMotion?.time ?? performance.now(),
+    };
+    this.request();
+  }
+
+  cancelZoom() {
+    this.zoomMotion = null;
+  }
+
+  private applyZoom(sx: number, sy: number, factor: number) {
     const [x, y] = this.screenToRel(sx, sy);
     this.scale = Math.max(1e-7, Math.min(1e7, this.scale * factor));
     // keep the point under the cursor fixed
     this.cx = x - (sx - this.width / 2) / this.scale;
     this.cy = y + (sy - this.height / 2) / this.scale;
     this.viewRevision++;
-    this.request();
   }
 
   panBy(dx: number, dy: number) {
+    this.cancelZoom();
     this.cx -= dx / this.scale;
     this.cy += dy / this.scale;
     this.viewRevision++;
@@ -293,7 +319,7 @@ export class DrawingCanvas {
     let best: number | null = null, bd = Infinity, barea = Infinity;
     for (const i of cand) {
       const p = this.drawing.prims[i];
-      if (this.hiddenLayers.has(p[2])) continue;
+      if (this.hiddenLayers.has(p[2]) || this.isDefinitionPoint(p)) continue;
       const d = primDistance(p, x, y, this.primBox.subarray(i * 4, i * 4 + 4));
       if (d > tol) continue;
       const b = this.primBox.subarray(i * 4, i * 4 + 4);
@@ -319,7 +345,18 @@ export class DrawingCanvas {
     // rAF does not fire in hidden tabs (and some automation hosts); fall back to a timer there
     const run = () => {
       this.raf = 0;
+      const motion = this.zoomMotion;
+      if (motion) {
+        const now = performance.now();
+        const remaining = Math.log(motion.scale / this.scale);
+        const done = Math.abs(remaining) < 0.001;
+        const fraction = 1 - Math.exp(-Math.max(1, now - motion.time) / 40);
+        this.applyZoom(motion.x, motion.y, done ? motion.scale / this.scale : Math.exp(remaining * fraction));
+        motion.time = now;
+        if (done) this.zoomMotion = null;
+      }
       this.draw();
+      if (this.zoomMotion) this.request();
     };
     this.raf = document.hidden ? window.setTimeout(run, 16) : requestAnimationFrame(run);
   }
@@ -416,7 +453,12 @@ export class DrawingCanvas {
           } else if (pass === "dot") {
             if (s < 0.5) continue; // dots are noise at overview scale
             ctx.fillStyle = b.color;
-            ctx.fill(b.path);
+            // Points have no world radius. Draw a small mark in screen pixels.
+            for (let i = 0; i < b.dots.length; i += 2) {
+              const x = b.dots[i], y = b.dots[i + 1];
+              if (x < vis[0] || x > vis[2] || y < vis[1] || y > vis[3]) continue;
+              ctx.fillRect(x - 0.75 / s, y - 0.75 / s, 1.5 / s, 1.5 / s);
+            }
           } else {
             ctx.globalAlpha = pass === "fillSolid" ? 0.85 : 0.16;
             ctx.fillStyle = b.color;
@@ -465,10 +507,10 @@ export class DrawingCanvas {
         for (const i of this.entPrims[e] ?? []) {
           const p = d.prims[i];
           const b = this.primBox.subarray(i * 4, i * 4 + 4);
-          if (this.hiddenLayers.has(p[2]) || !onScreen(b)) continue;
+          if (this.hiddenLayers.has(p[2]) || this.isDefinitionPoint(p) || !onScreen(b)) continue;
           if (Math.max(b[2] - b[0], b[3] - b[1]) * s < 0.375 && p[0] !== "d") continue;
           if (p[0] === "f") addPrimToPath(fill, p);
-          else if (p[0] !== "t") addPrimToPath(path, p);
+          else if (p[0] !== "t") addPrimToPath(path, p, 0.75 / s);
         }
       ctx.strokeStyle = theme.select;
       ctx.lineWidth = 2.5 / s;
@@ -530,6 +572,10 @@ export class DrawingCanvas {
       ctx.globalAlpha = 1;
     }
   }
+
+  private isDefinitionPoint(p: Prim) {
+    return p[0] === "d" && this.drawing?.layers[p[2]]?.name.toLowerCase() === "defpoints";
+  }
 }
 
 // ------------------------------------------------------------------ prim helpers
@@ -579,7 +625,7 @@ function primBbox(p: Prim): [number, number, number, number] {
   }
 }
 
-function addPrimToPath(path: Path2D, p: Prim) {
+function addPrimToPath(path: Path2D, p: Prim, pointRadius = 0.75) {
   switch (p[0]) {
     case "p": {
       const f = p[5];
@@ -604,7 +650,7 @@ function addPrimToPath(path: Path2D, p: Prim) {
       path.arc(p[4], p[5], p[6], p[7], p[8], false);
       break;
     case "d": {
-      const r = 0.15;
+      const r = pointRadius;
       path.moveTo(p[4] + r, p[5]);
       path.arc(p[4], p[5], r, 0, Math.PI * 2);
       break;

@@ -38,6 +38,7 @@ function rememberView() {
   $<HTMLButtonElement>("#view-back").disabled = false;
 }
 function backView() {
+  view.cancelZoom();
   const camera = previousViews.pop();
   if (camera) { Object.assign(view, camera); view.viewRevision++; view.request(); }
   $<HTMLButtonElement>("#view-back").disabled = !previousViews.length;
@@ -467,6 +468,7 @@ function updateCoordinates() {
 }
 cv.addEventListener("pointerdown", (e) => {
   if (!drawing || (e.button !== 0 && e.button !== 1) || drag) return;
+  view.cancelZoom();
   e.preventDefault();
   cv.focus({ preventScroll: true });
   cv.setPointerCapture(e.pointerId);
@@ -520,7 +522,7 @@ cv.addEventListener(
     const r = cv.getBoundingClientRect();
     const pixels = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? view.height : 1);
     const factor = Math.exp(-Math.max(-400, Math.min(400, pixels)) * 0.002);
-    view.zoomAt(e.clientX - r.left, e.clientY - r.top, factor);
+    view.smoothZoomAt(e.clientX - r.left, e.clientY - r.top, factor);
   },
   { passive: false },
 );

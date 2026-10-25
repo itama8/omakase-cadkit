@@ -21,6 +21,20 @@
     assert(!hasInk(), 'subpixel geometry must be culled at overview scale');
     v.zoomAt(v.width / 2, v.height / 2, 10000); v.draw();
     assert(hasInk(), 'geometry must reappear when zoomed in');
+    const pointDrawing = { ...originalDrawing, origin: [0, 0], layers: [{ name: 'Defpoints' }], prims: [['d', 0, 0, 0xffffff, 0, 0]], entities: [{ h: 'POINT', type: 'POINT', layer: 0, color: 0xffffff, bbox: [0, 0, 0, 0] }] };
+    v.setDrawing(pointDrawing);
+    v.cx = v.cy = 0; v.scale = 100; v.draw();
+    assert(!hasInk(), 'dimension definition points must not render');
+    assert(v.pick(v.width / 2, v.height / 2) === null, 'invisible definition points must not intercept picking');
+    v.setDrawing({ ...pointDrawing, layers: [{ name: 'Survey points' }] });
+    for (const scale of [10, 1000]) {
+      v.cx = v.cy = 0; v.scale = scale; v.draw();
+      const p = pixels();
+      let ink = 0;
+      for (let i = 0; i < p.length; i += 4) if (p[i] > 100) ink++;
+      assert(ink > 0 && ink <= Math.ceil(4 * devicePixelRatio) ** 2, 'ordinary points must remain small at every scale');
+      assert(v.pick(v.width / 2, v.height / 2) === 0, 'ordinary points must remain inspectable');
+    }
     // Crossing tile boundaries and reusing old tiles must preserve geometry and text.
     v.setDrawing({ ...originalDrawing, origin: [0, 0], entities: [{ h: 'TEST', type: 'LINE', layer: 0, color: 0xffffff }], prims: [
       ['p', 0, 0, 0xff0000, 0, [-2000, 0, 2000, 0]],
@@ -43,6 +57,20 @@
   document.querySelector('#fit').click();
   await wait(100);
   const home = camera();
+  const rect = v.canvas.getBoundingClientRect();
+  const wheelAnchor = v.screenToWorld(130, 150);
+  for (let i = 0; i < 3; i++) v.canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, clientX: rect.left + 130, clientY: rect.top + 150, cancelable: true }));
+  assert(same(camera(), home), 'wheel input must animate instead of jumping immediately');
+  await wait(500);
+  assert(Math.abs(v.scale / home[2] - Math.exp(.6)) < 1e-6, 'wheel animation must accumulate every wheel event and settle exactly');
+  assert(same(v.screenToWorld(130, 150), wheelAnchor), 'animated zoom must preserve the cursor anchor');
+  document.querySelector('#view-back').click();
+  assert(same(camera(), home), 'Back must undo the complete wheel gesture');
+  v.smoothZoomAt(130, 150, 2);
+  document.querySelector('#fit').click();
+  const fitted = camera();
+  await wait(150);
+  assert(same(camera(), fitted), 'Fit must cancel an unfinished wheel animation');
   assert(!v.showAllFindings, 'overview must start with only the active finding marker');
   document.querySelector('#all-markers').click();
   assert(v.showAllFindings, 'all finding markers can be enabled');
