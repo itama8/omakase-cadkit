@@ -5,8 +5,8 @@ networks, layouts, sections, detail sheets. It is built for an agent and a revie
 together. The agent gets text with entity handles; the reviewer gets a viewer that jumps to
 those handles.
 
-The source CLI and viewer work today. A reusable npm library and versioned package
-are being prepared; there is no supported package import API yet. See the compact
+The source CLI, viewer and library work today. Standalone alpha downloads are
+available; npm publishing remains disabled. See the compact
 [outcome map](docs/outcomes.md) for current work and what comes next.
 
 A supervised sidecar owns the file format, a service owns files and lint, and a
@@ -23,7 +23,7 @@ DWG/DXF ──> sidecar (C#, ACadSharp)  ──payload JSON──>  cache (~/.ca
 ## Run it
 
 **Tester:** download the ZIP for your platform from the [latest
-release](https://github.com/itama8/omakase-cadkit/releases), unzip it, and
+prerelease](https://github.com/itama8/omakase-cadkit/releases/tag/v0.1.0-alpha.1), unzip it, and
 double-click `launch.cmd` on Windows or `launch.command` on macOS/Linux. The
 archive carries its own Node runtime and DWG/DXF sidecar, so nothing is installed
 and nothing is downloaded on first run. Builds exist for Linux x64, macOS Apple
@@ -214,4 +214,9 @@ skills/omakase-cadkit/         agent skill for using omakase-cadkit on drawings
 
 ## License
 
-[MIT](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md) for ACadSharp attribution.
+Copyright (c) 2026 omakase-cadkit contributors.
+
+[GNU Affero General Public License v3.0 only (AGPL-3.0-only)](LICENSE).
+Dependencies retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md).
+The previously published `v0.1.0-alpha.1` tag and downloads retain their MIT license;
+this change applies to subsequent source revisions and releases.

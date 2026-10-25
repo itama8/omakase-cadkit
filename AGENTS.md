@@ -12,7 +12,7 @@ omakase-cadkit on drawings (not developing it) is covered by `skills/omakase-cad
 - Record meaningful changes, decisions, exact checks and limits in `.devlog/YYYY-MM-DD-sNN.md`
   using `.devlog/TEMPLATE.md`. Update the outcome row when its state or next action changes.
 - `CONTRIBUTING.md` covers contribution and evidence expectations. Source checks do not
-  establish installed-package or cross-platform support. MIT is selected; npm publishing
+  establish installed-package or cross-platform support. AGPL-3.0-only is selected; npm publishing
   remains disabled until the package outcome is verified.
 
 ## Commands

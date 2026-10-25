@@ -36,7 +36,7 @@
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/itama8/omakase-cadkit.git"

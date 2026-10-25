@@ -1,6 +1,6 @@
 # Third-party notices
 
-omakase-cadkit is MIT licensed. Dependencies retain their own licenses and copyrights.
+omakase-cadkit is licensed under AGPL-3.0-only; see [LICENSE](LICENSE). Dependencies retain their own licenses and copyrights.
 
 ## ACadSharp 3.8.0
 

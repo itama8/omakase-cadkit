@@ -74,6 +74,7 @@ copy("fixtures/omakase-cadkit.json");
 for (const file of readdirSync(path.join(root, "fixtures")).filter((f) => /\.(dxf|dwg)$/i.test(f))) copy(path.join("fixtures", file));
 for (const file of ["README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "package.json"]) copy(file);
 copy("docs");
+copy("licenses");
 copy("skills");
 copy("launch.command");
 copy("launch.cmd");

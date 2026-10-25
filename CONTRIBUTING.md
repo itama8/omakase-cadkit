@@ -10,7 +10,7 @@ one useful result and state how it will be verified. Next and Later outcomes are
 direction, not a request to implement everything. Discuss changes to public API,
 runtime requirements, and distribution before treating them as settled contracts.
 
-The project is MIT licensed; see [LICENSE](LICENSE). Contributions are made under
+The project is licensed under AGPL-3.0-only; see [LICENSE](LICENSE). Contributions are made under
 that license. Preserve dependency attribution in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Make and verify a change

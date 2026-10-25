@@ -7,7 +7,7 @@ checkout** is for contributing and needs the toolchain. There is no npm package 
 ## Install a download
 
 Download the ZIP matching your computer from the [latest
-release](https://github.com/itama8/omakase-cadkit/releases), unzip it into a folder
+prerelease](https://github.com/itama8/omakase-cadkit/releases/tag/v0.1.0-alpha.1), unzip it into a folder
 you keep, and launch it. The archive carries its own Node runtime and a prebuilt
 DWG/DXF sidecar, so it needs no Node, no .NET, no build step and no internet after
 the download.
@@ -20,6 +20,10 @@ the download.
 | Linux x64 | `omakase-cadkit-<version>-linux-x64.zip` | Run `bash launch.command` |
 
 Linux ARM64 has no download yet; use a source checkout, which builds its own sidecar.
+
+The published `v0.1.0-alpha.1` downloads retain their MIT license. Current source
+revisions use AGPL-3.0-only; see [LICENSE](../LICENSE) and the
+[README license section](../README.md#license).
 
 `START-HERE.txt` in the folder repeats these steps. The viewer opens on
 `http://127.0.0.1:4280/`; the folder icon opens a drawing in the viewer, and
@@ -92,7 +96,8 @@ Tool installation references: [Node.js](https://nodejs.org/en/download),
 [.NET 8](https://dotnet.microsoft.com/en-us/download/dotnet/8.0), and
 [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
-Source setup is verified on Linux x64. Windows and macOS are not yet verified.
+Source setup and bundle launch are verified in CI on Linux x64, macOS arm64/x64
+and Windows x64. These are automated checks, not manual desktop acceptance.
 Chromium is optional for viewer automation. `rsvg-convert` or ImageMagick is
 optional for PNG export; SVG export needs neither.
 
