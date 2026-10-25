@@ -58,7 +58,7 @@
     v.panBy(380, 170); v.draw();
     ctx.drawImage(v.canvas, 0, 0);
     const cached = ctx.getImageData(0, 0, reader.width, reader.height).data;
-    v.rasters.clear(); v.draw();
+    v.front = null; v.draw();
     ctx.drawImage(v.canvas, 0, 0);
     const fresh = ctx.getImageData(0, 0, reader.width, reader.height).data;
     let maxDelta = 0;
@@ -72,13 +72,29 @@
   const home = camera();
   const rect = v.canvas.getBoundingClientRect();
   const wheelAnchor = v.screenToWorld(130, 150);
+  let wheelRenders = 0;
+  v.renderRaster = function (...args) { wheelRenders++; return Object.getPrototypeOf(v).renderRaster.apply(this, args); };
   for (let i = 0; i < 3; i++) v.canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, clientX: rect.left + 130, clientY: rect.top + 150, cancelable: true }));
   assert(same(camera(), home), 'wheel input must animate instead of jumping immediately');
-  await wait(500);
+  await wait(40);
+  assert(v.scale !== home[2] && wheelRenders === 0, 'wheel zoom must stretch cached tiles instead of re-rendering every frame');
+  await wait(460);
+  delete v.renderRaster;
+  assert(wheelRenders > 0 && v.front.scale === v.scale && !v.pending, 'wheel zoom must re-render at the final scale once it settles');
   assert(Math.abs(v.scale / home[2] - Math.exp(.6)) < 1e-6, 'wheel animation must accumulate every wheel event and settle exactly');
   assert(same(v.screenToWorld(130, 150), wheelAnchor), 'animated zoom must preserve the cursor anchor');
   document.querySelector('#view-back').click();
   assert(same(camera(), home), 'Back must undo the complete wheel gesture');
+  await wait(300);
+  wheelRenders = 0;
+  v.renderRaster = function (...args) { wheelRenders++; return Object.getPrototypeOf(v).renderRaster.apply(this, args); };
+  for (let i = 0; i < 12; i++) { v.canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, clientX: rect.left + 130, clientY: rect.top + 150, cancelable: true })); await wait(20); }
+  assert(wheelRenders === 0 && v.scale > 4 * v.front.scale, 'a long wheel zoom must keep stretching, not render at intermediate scales');
+  await wait(600);
+  delete v.renderRaster;
+  assert(v.front.scale === v.scale && !v.pending, 'a long wheel zoom must re-render once it settles');
+  document.querySelector('#view-back').click();
+  assert(same(camera(), home), 'Back must undo a long wheel gesture');
   v.smoothZoomAt(130, 150, 2);
   document.querySelector('#fit').click();
   const fitted = camera();
@@ -105,7 +121,7 @@
     assert(renders <= Math.ceil(v.width / 256) + Math.ceil(v.height / 256) + 4, 'small pans may render only newly exposed edge tiles');
     renders = 0;
     v.panBy(400, 0); v.draw();
-    assert(renders > 0 && renders < v.rasters.size, 'long pans must reuse overlapping tiles');
+    assert(renders > 0 && renders < v.front.tiles.size, 'long pans must reuse overlapping tiles');
     renders = 0;
     v.panBy(-400, 0); v.draw();
     assert(renders === 0, 'reversing a long drag must reuse previously rendered tiles');
@@ -120,7 +136,7 @@
     assert(renders > 0, 'zoom must rerender geometry at its new scale');
     // Retained tile pixels are bounded even when a drag covers many viewports.
     for (let i = 0; i < 80; i++) { v.panBy(256, 256); v.draw(); }
-    assert(v.rasters.size * Math.ceil(262 * devicePixelRatio) ** 2 <= Math.max(16_000_000, (Math.ceil(v.width / 256) + 1) * (Math.ceil(v.height / 256) + 1) * Math.ceil(262 * devicePixelRatio) ** 2), 'long drags must keep raster memory bounded');
+    assert((v.front.tiles.size + (v.back?.tiles.size ?? 0)) * Math.ceil(262 * devicePixelRatio) ** 2 <= Math.max(16_000_000, (Math.ceil(v.width / 256) + 1) * (Math.ceil(v.height / 256) + 1) * Math.ceil(262 * devicePixelRatio) ** 2), 'long drags must keep raster memory bounded');
   } finally { v.renderRaster = renderRaster; }
 
   for (const side of ['left', 'right']) {

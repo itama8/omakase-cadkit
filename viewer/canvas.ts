@@ -3,7 +3,7 @@
 //
 // Strokes and fills are batched into Path2D objects per (tile, layer, colour) in drawing
 // coordinates, so a frame is a few hundred stroke() calls whatever the entity count. Text is
-// drawn per item in screen space and skipped once it is too small to read.
+// drawn per item in screen space, fading out below 3 px and skipped below 1.5 px.
 
 import type { Bbox, Drawing, Finding, Prim, Raster } from "../src/types.ts";
 
@@ -54,12 +54,29 @@ interface RasterTile {
   labels: number;
 }
 
+/** Raster tiles rendered at one scale, in drawing pixels at that scale (x right, y down). */
+interface RasterLayer {
+  scale: number;
+  originX: number;
+  originY: number;
+  tiles: Map<string, RasterTile>;
+}
+
 export interface RasterOverlay extends Raster {
   bitmap: CanvasImageSource;
 }
 
 const RASTER_SIZE = 256;
 const RASTER_BLEED = 3;
+/** Text fades out between these heights in screen pixels, so labels thin out over a few zoom steps rather than vanish at once. */
+const TEXT_FULL_PX = 3;
+const TEXT_MIN_PX = 1.5;
+/** Wheel zoom stretches cached tiles; linework is re-rendered once input has been quiet this long. */
+const ZOOM_SETTLE_MS = 120;
+/** Tile rendering per frame while a stretched stand-in covers the gaps. */
+const RENDER_BUDGET_MS = 8;
+/** Longest side, in device pixels, of the whole-drawing image shown where no tiles exist yet. */
+const OVERVIEW_PX = 2048;
 
 type Rgb = number;
 
@@ -107,10 +124,17 @@ export class DrawingCanvas {
   private dpr = 1;
   private raf = 0;
   private zoomMotion: { x: number; y: number; scale: number; time: number } | null = null;
-  private rasters = new Map<string, RasterTile>();
+  /** Tiles being drawn at (or stretched towards) the current scale. */
+  private front: RasterLayer | null = null;
+  /** The previous front, stretched underneath while the new one fills in. */
+  private back: RasterLayer | null = null;
+  /** The whole drawing at low resolution, under both, so zooming out never shows blank. */
+  private overview: { key: string; scale: number; left: number; top: number; canvas: HTMLCanvasElement } | null = null;
+  private overviewIdle = 0;
   private sceneKey = "";
-  private rasterOriginX = 0;
-  private rasterOriginY = 0;
+  private zoomInputAt = 0;
+  private settleTimer = 0;
+  private pending = false;
   private drawingVersion = 0;
   images: RasterOverlay[] = [];
   /** Raster images (aerial photos, scans) drawn behind the linework, independent of layers. */
@@ -312,6 +336,7 @@ export class DrawingCanvas {
       scale: Math.max(1e-7, Math.min(1e7, (this.zoomMotion?.scale ?? this.scale) * factor)),
       time: this.zoomMotion?.time ?? performance.now(),
     };
+    this.zoomInputAt = performance.now();
     this.request();
   }
 
@@ -394,18 +419,19 @@ export class DrawingCanvas {
         const now = performance.now();
         const remaining = Math.log(motion.scale / this.scale);
         const done = Math.abs(remaining) < 0.001;
-        const fraction = 1 - Math.exp(-Math.max(1, now - motion.time) / 40);
+        const fraction = 1 - Math.exp(-Math.max(1, now - motion.time) / 25);
         this.applyZoom(motion.x, motion.y, done ? motion.scale / this.scale : Math.exp(remaining * fraction));
         motion.time = now;
         if (done) this.zoomMotion = null;
       }
-      this.draw();
-      if (this.zoomMotion) this.request();
+      this.draw(true);
+      if (this.zoomMotion || this.pending) this.request();
     };
     this.raf = document.hidden ? window.setTimeout(run, 16) : requestAnimationFrame(run);
   }
 
-  draw() {
+  /** `progressive` spreads a re-render over frames when a stretched stand-in can cover the gaps. */
+  draw(progressive = false) {
     const t0 = performance.now();
     const ctx = this.ctx;
     const { theme } = this;
@@ -419,68 +445,160 @@ export class DrawingCanvas {
     const screen = () => ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     const onScreen = (b: ArrayLike<number>) => b[0] <= vis[2] && b[2] >= vis[0] && b[1] <= vis[3] && b[3] >= vis[1];
 
-    // Anchor raster tiles to drawing space at this scale. Long pans and panel resizes render
-    // only newly exposed tiles; crossing a cache boundary never repaints the whole viewport.
-    const left = this.cx * s - this.width / 2, top = -this.cy * s - this.height / 2;
-    const key = `${this.drawingVersion}|${this.dpr}|${s}|${[...this.hiddenLayers].sort().join(",")}|${[...this.selected].join(",")}|${JSON.stringify(theme)}`;
+    // Raster tiles are anchored to drawing space at one scale, so pans render only newly
+    // exposed tiles. While the wheel is moving, the cached tiles are stretched instead of
+    // re-rendered; once it settles a new layer fills in over the stretched old one.
+    const now = performance.now();
+    const key = `${this.drawingVersion}|${this.dpr}|${[...this.hiddenLayers].sort().join(",")}|${[...this.selected].join(",")}|${JSON.stringify(theme)}`;
     if (key !== this.sceneKey) {
-      for (const tile of this.rasters.values()) tile.canvas.width = tile.canvas.height = 1;
-      this.rasters.clear();
+      this.dropLayer(this.front);
+      this.dropLayer(this.back);
+      this.front = this.back = null;
       this.sceneKey = key;
-      // Align the initial grid to the viewport so a fresh fit/zoom keeps text sharp.
-      this.rasterOriginX = left;
-      this.rasterOriginY = top;
     }
-    const x0 = Math.floor((left - this.rasterOriginX) / RASTER_SIZE), x1 = Math.ceil((left - this.rasterOriginX + this.width) / RASTER_SIZE) - 1;
-    const y0 = Math.floor((top - this.rasterOriginY) / RASTER_SIZE), y1 = Math.ceil((top - this.rasterOriginY + this.height) / RASTER_SIZE) - 1;
-    const visible = new Set<string>();
-    let labels = 0;
-    for (let y = y0; y <= y1; y++)
-      for (let x = x0; x <= x1; x++) {
-        const id = `${x},${y}`;
-        const tileLeft = this.rasterOriginX + x * RASTER_SIZE, tileTop = this.rasterOriginY + y * RASTER_SIZE;
-        visible.add(id);
-        let tile = this.rasters.get(id);
-        if (!tile) tile = this.renderRaster(tileLeft, tileTop);
-        // Refresh insertion order for bounded LRU eviction after compositing.
-        this.rasters.delete(id);
-        this.rasters.set(id, tile);
-        labels += tile.labels;
-        // Whole pixels keep cached text sharp when a resize leaves the centre on a half pixel.
-        ctx.drawImage(tile.canvas, Math.round(tileLeft - left) - RASTER_BLEED, Math.round(tileTop - top) - RASTER_BLEED, tile.canvas.width / this.dpr, tile.canvas.height / this.dpr);
-      }
-    this.lastTextCount = labels;
-    // About 64 MB of raster pixels, allowing at least the current viewport on large screens.
-    const limit = Math.max(visible.size, Math.floor(16_000_000 / Math.ceil((RASTER_SIZE + 2 * RASTER_BLEED) * this.dpr) ** 2));
-    for (const id of this.rasters.keys()) {
-      if (this.rasters.size <= limit) break;
-      if (!visible.has(id)) {
-        const tile = this.rasters.get(id)!;
-        tile.canvas.width = tile.canvas.height = 1;
-        this.rasters.delete(id);
-      }
+    const zooming = this.zoomMotion !== null || now - this.zoomInputAt < ZOOM_SETTLE_MS;
+    // Nothing is rendered at intermediate scales: tiles drawn mid-gesture are stale a few frames later.
+    if (!this.front || (!zooming && s !== this.front.scale)) {
+      // A front still filling in is a worse stand-in than the complete layer beneath it.
+      if (this.front?.tiles.size && !(this.pending && this.back)) {
+        this.dropLayer(this.back);
+        this.back = this.front;
+      } else this.dropLayer(this.front);
+      // Align the new grid to the viewport so a fresh fit/zoom keeps text sharp.
+      this.front = { scale: s, originX: this.cx * s - this.width / 2, originY: -this.cy * s - this.height / 2, tiles: new Map() };
     }
+    const budget = zooming && this.front.tiles.size ? 0 : progressive && this.back ? RENDER_BUDGET_MS : Infinity;
+    if (budget !== Infinity && this.gaps(this.front)) {
+      this.paintOverview(ctx);
+      if (this.back) this.paintLayer(ctx, this.back, 0);
+    }
+    const missing = this.paintLayer(ctx, this.front, budget);
+    this.pending = missing > 0 && budget > 0;
+    if (!missing && !zooming) {
+      this.dropLayer(this.back);
+      this.back = null;
+    }
+    if (!zooming && !this.pending && this.overview?.key !== this.overviewKey()) this.scheduleOverview();
+    window.clearTimeout(this.settleTimer);
+    if (zooming && !this.zoomMotion) this.settleTimer = window.setTimeout(() => this.request(), ZOOM_SETTLE_MS - (now - this.zoomInputAt) + 1);
 
     this.drawOverlays(ctx, screen, onScreen);
     this.lastDrawMs = performance.now() - t0;
     this.onView?.();
   }
 
-  private renderRaster(left: number, top: number): RasterTile {
+  /** Visible tiles the layer does not have. */
+  private gaps(layer: RasterLayer): number {
+    const k = this.scale / layer.scale;
+    const left = this.cx * layer.scale - this.width / 2 / k, top = -this.cy * layer.scale - this.height / 2 / k;
+    const x0 = Math.floor((left - layer.originX) / RASTER_SIZE), x1 = Math.ceil((left - layer.originX + this.width / k) / RASTER_SIZE) - 1;
+    const y0 = Math.floor((top - layer.originY) / RASTER_SIZE), y1 = Math.ceil((top - layer.originY + this.height / k) / RASTER_SIZE) - 1;
+    let missing = 0;
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (!layer.tiles.has(`${x},${y}`)) missing++;
+    return missing;
+  }
+
+  private overviewKey() {
+    return `${this.drawingVersion}|${this.dpr}|${[...this.hiddenLayers].sort().join(",")}|${JSON.stringify(this.theme)}`;
+  }
+
+  /** Render the overview when the browser is idle, never during a gesture. */
+  private scheduleOverview() {
+    if (this.overviewIdle) return;
+    const run = () => {
+      this.overviewIdle = 0;
+      if (!this.drawing || this.zoomMotion || performance.now() - this.zoomInputAt < ZOOM_SETTLE_MS) return;
+      const key = this.overviewKey();
+      if (this.overview?.key === key) return;
+      if (this.overview) this.overview.canvas.width = 1;
+      const [x0, y0, x1, y1] = this.extents;
+      const scale = OVERVIEW_PX / this.dpr / Math.max(x1 - x0, y1 - y0, 1e-9);
+      const left = x0 * scale, top = -y1 * scale;
+      const { canvas } = this.renderRaster(scale, left, top, (x1 - x0) * scale, (y1 - y0) * scale, false);
+      this.overview = { key, scale, left, top, canvas };
+    };
+    this.overviewIdle = typeof requestIdleCallback === "function" ? requestIdleCallback(run, { timeout: 1000 }) : window.setTimeout(run, 200);
+  }
+
+  private paintOverview(ctx: CanvasRenderingContext2D) {
+    const o = this.overview;
+    if (!o || o.key !== this.overviewKey()) return;
+    const k = this.scale / o.scale;
+    const left = this.cx * o.scale - this.width / 2 / k, top = -this.cy * o.scale - this.height / 2 / k;
+    ctx.drawImage(o.canvas, (o.left - left - RASTER_BLEED) * k, (o.top - top - RASTER_BLEED) * k, (o.canvas.width / this.dpr) * k, (o.canvas.height / this.dpr) * k);
+  }
+
+  /** Composite a layer's tiles over the viewport, rendering missing ones for up to `budget` ms (at least one tile when positive). Returns how many are still missing. */
+  private paintLayer(ctx: CanvasRenderingContext2D, layer: RasterLayer, budget: number): number {
+    const deadline = performance.now() + budget;
+    const k = this.scale / layer.scale;
+    // viewport origin in the layer's pixel space
+    const left = this.cx * layer.scale - this.width / 2 / k, top = -this.cy * layer.scale - this.height / 2 / k;
+    const x0 = Math.floor((left - layer.originX) / RASTER_SIZE), x1 = Math.ceil((left - layer.originX + this.width / k) / RASTER_SIZE) - 1;
+    const y0 = Math.floor((top - layer.originY) / RASTER_SIZE), y1 = Math.ceil((top - layer.originY + this.height / k) / RASTER_SIZE) - 1;
+    const visible = new Set<string>();
+    let labels = 0, missing = 0, rendered = false;
+    for (let y = y0; y <= y1; y++)
+      for (let x = x0; x <= x1; x++) {
+        const id = `${x},${y}`;
+        const tileLeft = layer.originX + x * RASTER_SIZE, tileTop = layer.originY + y * RASTER_SIZE;
+        visible.add(id);
+        let tile = layer.tiles.get(id);
+        // Always make progress by at least one tile per frame.
+        if (!tile && budget > 0 && (!rendered || performance.now() < deadline)) {
+          tile = this.renderRaster(layer.scale, tileLeft, tileTop);
+          rendered = true;
+        }
+        if (!tile) {
+          missing++;
+          continue;
+        }
+        // Refresh insertion order for bounded LRU eviction after compositing.
+        layer.tiles.delete(id);
+        layer.tiles.set(id, tile);
+        labels += tile.labels;
+        const size = tile.canvas.width / this.dpr;
+        if (k === 1)
+          // Whole pixels keep cached text sharp when a resize leaves the centre on a half pixel.
+          ctx.drawImage(tile.canvas, Math.round(tileLeft - left) - RASTER_BLEED, Math.round(tileTop - top) - RASTER_BLEED, size, size);
+        else ctx.drawImage(tile.canvas, (tileLeft - left - RASTER_BLEED) * k, (tileTop - top - RASTER_BLEED) * k, size * k, size * k);
+      }
+    if (layer === this.front) {
+      this.lastTextCount = labels;
+      // About 64 MB of raster pixels, allowing at least the current viewport on large screens.
+      const limit = Math.max(visible.size, Math.floor(16_000_000 / Math.ceil((RASTER_SIZE + 2 * RASTER_BLEED) * this.dpr) ** 2));
+      for (const id of layer.tiles.keys()) {
+        if (layer.tiles.size <= limit) break;
+        if (!visible.has(id)) {
+          layer.tiles.get(id)!.canvas.width = 1;
+          layer.tiles.delete(id);
+        }
+      }
+    }
+    return missing;
+  }
+
+  private dropLayer(layer: RasterLayer | null) {
+    for (const tile of layer?.tiles.values() ?? []) tile.canvas.width = tile.canvas.height = 1;
+  }
+
+  private renderRaster(s: number, left: number, top: number, w = RASTER_SIZE, h = RASTER_SIZE, selection = true): RasterTile {
     const margin = RASTER_BLEED;
     const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = Math.ceil((RASTER_SIZE + 2 * margin) * this.dpr);
+    canvas.width = Math.ceil((w + 2 * margin) * this.dpr);
+    canvas.height = Math.ceil((h + 2 * margin) * this.dpr);
     const ctx = canvas.getContext("2d")!;
     const { theme } = this;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = theme.bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     const d = this.drawing!;
-    const s = this.scale;
-    const vis = [(left - margin) / s, -(top + RASTER_SIZE + margin) / s, (left + RASTER_SIZE + margin) / s, -(top - margin) / s];
+    const vis = [(left - margin) / s, -(top + h + margin) / s, (left + w + margin) / s, -(top - margin) / s];
     const onScreen = (b: ArrayLike<number>) => b[0] <= vis[2] && b[2] >= vis[0] && b[1] <= vis[3] && b[3] >= vis[1];
     const world = () => ctx.setTransform(this.dpr * s, 0, 0, -this.dpr * s, this.dpr * (margin - left), this.dpr * (margin - top));
-    const screen = () => ctx.setTransform(this.dpr, 0, 0, this.dpr, this.dpr * (this.cx * s - this.width / 2 - left + margin), this.dpr * (-this.cy * s - this.height / 2 - top + margin));
+    // pixels at this scale, relative to the tile
+    const screen = () => ctx.setTransform(this.dpr, 0, 0, this.dpr, this.dpr * (margin - left), this.dpr * (margin - top));
+    const toPx = (x: number, y: number): [number, number] => [x * s, -y * s];
 
     world();
     this.drawImages(ctx, vis);
@@ -521,13 +639,14 @@ export class DrawingCanvas {
         const p = d.prims[i] as Extract<Prim, ["t", ...unknown[]]>;
         if (this.hiddenLayers.has(p[2])) continue;
         const px = p[6] * s;
-        if (px < 3) continue;
+        if (px < TEXT_MIN_PX) continue;
         const b = this.primBox.subarray(i * 4, i * 4 + 4);
         if (b[0] > vis[2] || b[2] < vis[0] || b[1] > vis[3] || b[3] < vis[1]) continue;
-        const [sx, sy] = this.relToScreen(p[4], p[5]);
+        const [sx, sy] = toPx(p[4], p[5]);
         ctx.save();
         ctx.translate(sx, sy);
         ctx.rotate(-p[7]);
+        if (px < TEXT_FULL_PX) ctx.globalAlpha = (px - TEXT_MIN_PX) / (TEXT_FULL_PX - TEXT_MIN_PX);
         ctx.fillStyle = this.selected.has(p[1]) ? theme.select : cssColor(p[3], theme);
         ctx.font = `${px.toFixed(1)}px "Inter", "Helvetica Neue", Arial, sans-serif`;
         ctx.textAlign = p[8][0] === "c" ? "center" : p[8][0] === "r" ? "right" : "left";
@@ -536,7 +655,7 @@ export class DrawingCanvas {
         ctx.restore();
         nText++;
       }
-    this.drawSelection(ctx, world, screen, onScreen);
+    if (selection) this.drawSelection(ctx, s, toPx, world, screen, onScreen);
     return { canvas, labels: nText };
   }
 
@@ -570,10 +689,9 @@ export class DrawingCanvas {
     }
   }
 
-  private drawSelection(ctx: CanvasRenderingContext2D, world: () => void, screen: () => void, onScreen: (b: ArrayLike<number>) => boolean) {
+  private drawSelection(ctx: CanvasRenderingContext2D, s: number, toPx: (x: number, y: number) => [number, number], world: () => void, screen: () => void, onScreen: (b: ArrayLike<number>) => boolean) {
     const d = this.drawing!;
     const { theme } = this;
-    const s = this.scale;
     // selection
     if (this.selected.size) {
       world();
@@ -601,8 +719,8 @@ export class DrawingCanvas {
         const bb = d.entities[e]?.bbox;
         if (!bb) continue;
         const r = this.toRel(bb);
-        const [ax, ay] = this.relToScreen(r[0], r[3]);
-        const [bx, by] = this.relToScreen(r[2], r[1]);
+        const [ax, ay] = toPx(r[0], r[3]);
+        const [bx, by] = toPx(r[2], r[1]);
         if (bx - ax < 10 && by - ay < 10) {
           ctx.strokeStyle = theme.select;
           ctx.lineWidth = 1.5;
