@@ -1,0 +1,4 @@
+# Batch files are read by cmd.exe, which expects CRLF; ZIP downloads and checkouts
+# should deliver them that way. Bash launchers must stay LF or bash refuses to run them.
+*.cmd text eol=crlf
+*.command text eol=lf
