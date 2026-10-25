@@ -148,13 +148,14 @@ export function renderSvg(d: Drawing, o: SvgOptions): string {
         break;
       }
       case "t": {
-        const [, , , , x, y, h, rot, align, text] = p;
+        const [, , , , x, y, h, rot, align, text, font, wf] = p;
         const px = h * k;
         if (px < 2 || x < rel[0] - h * text.length || x > rel[2] + h || y < rel[1] - h * 2 || y > rel[3] + h * 2) continue;
         const anchor = align[0] === "c" ? "middle" : align[0] === "r" ? "end" : "start";
-        const base = align[1] === "t" ? "hanging" : align[1] === "m" ? "middle" : "alphabetic";
+        // h is the capital height (AutoCAD's text height); top and middle refer to it
+        const dy = align[1] === "t" ? px : align[1] === "m" ? px / 2 : 0;
         parts.push(
-          `<text x="${X(x)}" y="${Y(y)}" font-size="${px.toFixed(2)}" fill="${col}" text-anchor="${anchor}" dominant-baseline="${base}" transform="rotate(${((-rot * 180) / Math.PI).toFixed(2)} ${X(x)} ${Y(y)})">${esc(text)}</text>`,
+          `<text xml:space="preserve" x="${X(x)}" y="${Y(y)}" dy="${dy.toFixed(2)}" font-size="${(px * (font === "serif" ? 1.47 : 1 / 0.72)).toFixed(2)}"${font === "serif" ? ` font-family="'Times New Roman', Times, 'Liberation Serif', serif"` : ""} fill="${col}" text-anchor="${anchor}" transform="rotate(${((-rot * 180) / Math.PI).toFixed(2)} ${X(x)} ${Y(y)})${wf !== 1 ? ` matrix(${wf} 0 0 1 ${(Number(X(x)) * (1 - wf)).toFixed(2)} 0)` : ""}">${esc(text)}</text>`,
         );
         break;
       }

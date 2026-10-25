@@ -72,6 +72,15 @@ const RASTER_BLEED = 3;
 /** Text fades out between these heights in screen pixels, so labels thin out over a few zoom steps rather than vanish at once. */
 const TEXT_FULL_PX = 3;
 const TEXT_MIN_PX = 1.5;
+// AutoCAD text height is the capital height; em per capital height for each face
+// (matches SansEmPerCap / SerifEmPerCap in the sidecar).
+const EM_PER_CAP = { sans: 1 / 0.72, serif: 1.47 };
+const FONT = {
+  sans: `"Inter", "Helvetica Neue", Arial, "Liberation Sans", sans-serif`,
+  serif: `"Times New Roman", Times, "Liberation Serif", serif`,
+};
+// average advance per character, in text heights (bbox and hit testing)
+const CHAR_W = 0.8;
 /** Wheel zoom stretches cached tiles; linework is re-rendered once input has been quiet this long. */
 const ZOOM_SETTLE_MS = 120;
 /** Tile rendering per frame while a stretched stand-in covers the gaps. */
@@ -648,12 +657,14 @@ export class DrawingCanvas {
         ctx.save();
         ctx.translate(sx, sy);
         ctx.rotate(-p[7]);
+        if (p[11] !== 1) ctx.scale(p[11], 1);
         if (px < TEXT_FULL_PX) ctx.globalAlpha = (px - TEXT_MIN_PX) / (TEXT_FULL_PX - TEXT_MIN_PX);
         ctx.fillStyle = this.selected.has(p[1]) ? theme.select : cssColor(p[3], theme);
-        ctx.font = `${px.toFixed(1)}px "Inter", "Helvetica Neue", Arial, sans-serif`;
+        ctx.font = `${(px * EM_PER_CAP[p[10]]).toFixed(1)}px ${FONT[p[10]]}`;
         ctx.textAlign = p[8][0] === "c" ? "center" : p[8][0] === "r" ? "right" : "left";
-        ctx.textBaseline = p[8][1] === "t" ? "top" : p[8][1] === "m" ? "middle" : "alphabetic";
-        ctx.fillText(p[9], 0, 0);
+        ctx.textBaseline = "alphabetic";
+        // top and middle refer to the capital height, as in AutoCAD
+        ctx.fillText(p[9], 0, p[8][1] === "t" ? px : p[8][1] === "m" ? px / 2 : 0);
         ctx.restore();
         nText++;
       }
@@ -807,8 +818,8 @@ function primBbox(p: Prim): [number, number, number, number] {
     case "d":
       return [p[4], p[5], p[4], p[5]];
     case "t": {
-      const [, , , , x, y, h, rot, align, text] = p;
-      const w = 0.6 * h * text.length;
+      const [, , , , x, y, h, rot, align, text, , wf] = p;
+      const w = CHAR_W * h * text.length * wf;
       const ox = align[0] === "c" ? -w / 2 : align[0] === "r" ? -w : 0;
       const oy = align[1] === "m" ? -h / 2 : align[1] === "t" ? -h : 0;
       const c = Math.cos(rot), s = Math.sin(rot);

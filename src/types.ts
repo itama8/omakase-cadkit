@@ -1,4 +1,4 @@
-// Drawing payload written by the sidecar (schema 6). See sidecar/Program.cs.
+// Drawing payload written by the sidecar (schema 7). See sidecar/Program.cs.
 
 export type Bbox = [number, number, number, number]; // minX, minY, maxX, maxY (world)
 
@@ -70,7 +70,9 @@ export interface Entity {
  * top-level entity it came from, so block content selects its insert.
  *   ["p", ent, layer, rgb, closed, [x,y,...]]        polyline
  *   ["f", ent, layer, rgb, solid, [[x,y,...], ...]] filled geometric loops (even-odd); text-box paths omitted
- *   ["t", ent, layer, rgb, x, y, h, rotRad, align, text]  align = l|c|r + b|m|t
+ *   ["t", ent, layer, rgb, x, y, h, rotRad, align, text, font, wf]
+ *        h = capital height (AutoCAD text height); align = l|c|r + b|m|t, top and middle
+ *        refer to the capitals; font = sans|serif; wf = width factor (horizontal stretch)
  *   ["d", ent, layer, rgb, x, y]                     point
  *   ["c", ent, layer, rgb, x, y, r]                  circle
  *   ["a", ent, layer, rgb, x, y, r, a0, a1]          ccw arc, radians
@@ -78,7 +80,7 @@ export interface Entity {
 export type Prim =
   | ["p", number, number, number, 0 | 1, number[]]
   | ["f", number, number, number, 0 | 1, number[][]]
-  | ["t", number, number, number, number, number, number, number, string, string]
+  | ["t", number, number, number, number, number, number, number, string, string, "sans" | "serif", number]
   | ["d", number, number, number, number, number]
   | ["c", number, number, number, number, number, number]
   | ["a", number, number, number, number, number, number, number, number];
@@ -104,7 +106,7 @@ export interface Raster {
 }
 
 export interface Drawing {
-  schema: 6;
+  schema: 7;
   source: { path: string; format: string; bytes: number };
   acadVersion: string;
   header: { insUnits: string; insUnitsCode: number; extMin: [number, number]; extMax: [number, number]; ltScale: number };

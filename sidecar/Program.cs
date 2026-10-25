@@ -246,7 +246,7 @@ sealed class Payload
 		var w = _w;
 		var h = _doc.Header;
 		w.WriteStartObject();
-		w.WriteNumber("schema", 6);
+		w.WriteNumber("schema", 7);
 		w.WriteStartObject("source");
 		w.WriteString("path", path);
 		w.WriteString("format", Path.GetExtension(path).TrimStart('.').ToLowerInvariant());
@@ -542,9 +542,82 @@ sealed class Payload
 	static double X(IVector v) => v is XYZ a ? a.X : v is XY b ? b.X : v[0];
 	static double Y(IVector v) => v is XYZ a ? a.Y : v is XY b ? b.Y : v[1];
 
-	static string SafePlain(MText m)
+	static string SafePlain(MText m, bool widen = false) => MTextPlain(m.Value ?? "", widen);
+
+	// TEXT control codes for display: %%u/%%o/%%k toggle under/overline and strike-through,
+	// %%d %%p %%c are degree, plus-minus and diameter, %%nnn is a character code.
+	static string TextPlain(string? s)
 	{
-		try { return m.PlainText ?? ""; } catch { return m.Value ?? ""; }
+		if (string.IsNullOrEmpty(s) || !s.Contains("%%")) return s ?? "";
+		var sb = new StringBuilder(s.Length);
+		for (int i = 0; i < s.Length; i++)
+		{
+			if (s[i] != '%' || i + 2 >= s.Length || s[i + 1] != '%') { sb.Append(s[i]); continue; }
+			char k = char.ToLowerInvariant(s[i + 2]);
+			int n = 0, j = i + 2;
+			while (j < s.Length && j < i + 5 && char.IsAsciiDigit(s[j])) n = n * 10 + (s[j++] - '0');
+			if (j == i + 5) { sb.Append((char)n); i = j - 1; continue; }
+			switch (k)
+			{
+				case 'u': case 'o': case 'k': break;
+				case 'd': sb.Append('°'); break;
+				case 'p': sb.Append('±'); break;
+				case 'c': sb.Append('Ø'); break;
+				case '%': sb.Append('%'); break;
+				default: sb.Append("%%").Append(s[i + 2]); break;
+			}
+			i += 2;
+		}
+		return sb.ToString();
+	}
+
+	// MTEXT inline codes reduced to plain text. ACadSharp's PlainText leaves \W behind, and
+	// drafters indent with a widened space ({\W8.1; }TITLE), so with widen a space under a
+	// width factor is repeated to keep roughly its width on screen.
+	static string MTextPlain(string s, bool widen)
+	{
+		var sb = new StringBuilder(s.Length);
+		var saved = new Stack<double>();
+		double width = 1;
+		string Arg(ref int i)
+		{
+			int end = s.IndexOf(';', i + 1);
+			if (end < 0) end = s.Length;
+			var a = s.Substring(i + 1, end - i - 1);
+			i = end;
+			return a;
+		}
+		double pending = 0; // widened space not yet written, in plain spaces
+		for (int i = 0; i < s.Length; i++)
+		{
+			char c = s[i];
+			if (c == '{') { saved.Push(width); continue; }
+			if (c == '}') { if (saved.Count > 0) width = saved.Pop(); continue; }
+			if (c == ' ' && widen && width > 1) { pending += width; continue; }
+			if (pending > 0) { sb.Append(' ', (int)Math.Round(pending)); pending = 0; }
+			if (c != '\\' || i + 1 >= s.Length) { sb.Append(c); continue; }
+			char k = s[++i];
+			switch (k)
+			{
+				case 'P': case 'X': sb.Append('\n'); break;
+				case '~': sb.Append(' '); break;
+				case '\\': case '{': case '}': sb.Append(k); break;
+				case 'L': case 'l': case 'O': case 'o': case 'K': case 'k': case 'N': break;
+				case 'W':
+					if (double.TryParse(Arg(ref i), System.Globalization.NumberStyles.Float,
+						System.Globalization.CultureInfo.InvariantCulture, out var wf) && wf > 0) width = wf;
+					break;
+				case 'S': sb.Append(Arg(ref i).Replace('^', '/').Replace('#', '/')); break;
+				case 'A': case 'C': case 'c': case 'F': case 'f': case 'H': case 'Q': case 'T': case 'p':
+					Arg(ref i); break;
+				case 'U' when i + 5 < s.Length && s[i + 1] == '+'
+					&& int.TryParse(s.AsSpan(i + 2, 4), System.Globalization.NumberStyles.HexNumber, null, out var cp):
+					sb.Append((char)cp); i += 5; break;
+				default: sb.Append('\\').Append(k); break;
+			}
+		}
+		if (pending > 0) sb.Append(' ', (int)Math.Round(pending));
+		return sb.ToString();
 	}
 
 	// ---------------------------------------------------------------- render primitives
@@ -611,7 +684,8 @@ sealed class Payload
 	}
 
 	// align: horizontal l|c|r, vertical b|m|t (baseline is treated as bottom)
-	void PrimText(int layer, int rgb, double x0, double y0, double height, double rot, string align, string text, Affine t)
+	// serif: the style's font is a Times-like serif; wf: width factor (horizontal stretch)
+	void PrimText(int layer, int rgb, double x0, double y0, double height, double rot, string align, string text, Affine t, bool serif = false, double wf = 1)
 	{
 		if (string.IsNullOrWhiteSpace(text) || !(height > 0)) return;
 		var (x, y) = t.Apply(x0, y0);
@@ -619,8 +693,11 @@ sealed class Payload
 		var (vx, vy) = t.ApplyVec(-Math.Sin(rot) * height, Math.Cos(rot) * height);
 		var h = Math.Sqrt(vx * vx + vy * vy);
 		var r = Math.Atan2(uy, ux);
-		// approximate extents for the bbox and hit testing: 0.6 h per character
-		var wdt = 0.6 * h * text.Length;
+		// a block scaled unevenly stretches its text like a width factor
+		wf = (wf > 0 ? wf : 1) * Math.Sqrt(ux * ux + uy * uy) * height / h;
+		if (!double.IsFinite(wf) || wf <= 0) wf = 1;
+		// approximate extents for the bbox and hit testing
+		var wdt = TextWidth(text, h, serif) * wf;
 		double ox = align[0] == 'c' ? -wdt / 2 : align[0] == 'r' ? -wdt : 0;
 		double oy = align[1] == 'm' ? -h / 2 : align[1] == 't' ? -h : 0;
 		double cs = Math.Cos(r), sn = Math.Sin(r);
@@ -633,7 +710,27 @@ sealed class Payload
 		_w.WriteNumberValue(Math.Round(r, 5));
 		_w.WriteStringValue(align);
 		_w.WriteStringValue(text);
+		_w.WriteStringValue(serif ? "serif" : "sans");
+		_w.WriteNumberValue(Math.Round(wf, 4));
 		_w.WriteEndArray();
+	}
+
+	// Times-like faces are drawn with a metric-compatible serif; everything else (Arial, SHX
+	// stroke fonts) with the sans fallback.
+	static bool IsSerif(TextStyle? st)
+	{
+		var f = ((st?.Filename ?? "") + "|" + (st?.Name ?? "")).ToLowerInvariant();
+		return !f.Contains("sans") && (f.Contains("times") || f.Contains("georgia") || f.Contains("garamond")
+			|| f.Contains("cambria") || f.Contains("palatino") || f.Contains("bookman") || f.Contains("book antiqua")
+			|| f.Contains("century"));
+	}
+
+	// Narrow faces (Arial Narrow, ARIALN.TTF, condensed) are drawn as the regular face squeezed:
+	// Arial Narrow's advances are 82% of Arial's.
+	static double FaceWidth(TextStyle? st)
+	{
+		var f = ((st?.Filename ?? "") + "|" + (st?.Name ?? "")).ToLowerInvariant();
+		return f.Contains("narrow") || f.Contains("condensed") || f.Contains("arialn") ? 0.82 : 1;
 	}
 
 	void PrimDot(int layer, int rgb, double x0, double y0, Affine t)
@@ -819,14 +916,14 @@ sealed class Payload
 						TextHorizontalAlignment.Right => 'r',
 						_ => 'l',
 					};
-					if (tx.HorizontalAlignment == TextHorizontalAlignment.Middle) { PrimText(layer, rgb, p.X, p.Y, tx.Height, tx.Rotation, "cm", tx.Value, t.Then(Affine.Ocs(tx.Normal))); break; }
+					if (tx.HorizontalAlignment == TextHorizontalAlignment.Middle) { PrimText(layer, rgb, p.X, p.Y, tx.Height, tx.Rotation, "cm", TextPlain(tx.Value), t.Then(Affine.Ocs(tx.Normal)), IsSerif(tx.Style), tx.WidthFactor * FaceWidth(tx.Style)); break; }
 					char va = tx.VerticalAlignment switch
 					{
 						TextVerticalAlignmentType.Middle => 'm',
 						TextVerticalAlignmentType.Top => 't',
 						_ => 'b',
 					};
-					PrimText(layer, rgb, p.X, p.Y, tx.Height, tx.Rotation, $"{ha}{va}", tx.Value, t.Then(Affine.Ocs(tx.Normal)));
+					PrimText(layer, rgb, p.X, p.Y, tx.Height, tx.Rotation, $"{ha}{va}", TextPlain(tx.Value), t.Then(Affine.Ocs(tx.Normal)), IsSerif(tx.Style), tx.WidthFactor * FaceWidth(tx.Style));
 					break;
 				}
 			case MText m:
@@ -892,10 +989,14 @@ sealed class Payload
 
 	void EmitMText(MText m, int layer, int rgb, Affine t)
 	{
-		var text = SafePlain(m);
+		var text = SafePlain(m, widen: true);
 		if (string.IsNullOrWhiteSpace(text)) return;
-		var lines = text.Replace("\r\n", "\n").Split('\n');
 		double h = m.Height;
+		bool serif = IsSerif(m.Style);
+		double face = FaceWidth(m.Style);
+		// AutoCAD wraps each paragraph to the MTEXT box width (group 41)
+		var lines = text.Replace("\r\n", "\n").Split('\n')
+			.SelectMany(p => m.RectangleWidth > 0 ? Wrap(p, h, m.RectangleWidth / face, serif) : new[] { p }).ToArray();
 		double rot = Math.Atan2(m.AlignmentPoint.Y, m.AlignmentPoint.X);
 		double step = h * 1.6667 * (m.LineSpacing > 0 ? m.LineSpacing : 1);
 		var ap = m.AttachmentPoint.ToString(); // TopLeft, MiddleCenter, BottomRight, ...
@@ -908,8 +1009,63 @@ sealed class Payload
 		{
 			double up = firstTop - i * step; // distance of this line's top above the insert point
 			double ox = -Math.Sin(rot) * up, oy = Math.Cos(rot) * up;
-			PrimText(layer, rgb, m.InsertPoint.X + ox, m.InsertPoint.Y + oy, h, rot, ha + "t", lines[i], o);
+			PrimText(layer, rgb, m.InsertPoint.X + ox, m.InsertPoint.Y + oy, h, rot, ha + "t", lines[i], o, serif, face);
 		}
+	}
+
+	// Advance widths, 1/1000 em, for ' '..'~', read from Liberation Sans and Liberation Serif
+	// (metric-compatible with Arial and Times New Roman, the viewer's fallback faces).
+	static readonly short[] SansWidths = {
+		278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
+		556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
+		1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
+		667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
+		333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
+		556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
+	};
+	static readonly short[] SerifWidths = {
+		250, 333, 408, 500, 500, 833, 778, 180, 333, 333, 500, 564, 250, 333, 250, 278,
+		500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 278, 278, 564, 564, 564, 444,
+		921, 722, 667, 667, 722, 611, 556, 722, 722, 333, 389, 722, 611, 889, 722, 722,
+		556, 722, 667, 556, 611, 722, 722, 944, 722, 722, 611, 333, 278, 333, 469, 500,
+		333, 444, 500, 444, 500, 444, 333, 500, 500, 278, 278, 500, 278, 778, 500, 500,
+		500, 500, 333, 389, 278, 500, 500, 722, 500, 500, 444, 480, 200, 480, 541,
+	};
+	// em per capital height: Arial's cap is 0.716 em; Times measured against an AutoCAD plot
+	// (D1.1 title: h 26.81 drawn with a 39.5-unit em).
+	const double SansEmPerCap = 1 / 0.72, SerifEmPerCap = 1.47;
+
+	// Width of text drawn at capital height h, as the viewer draws it.
+	static double TextWidth(string s, double h, bool serif)
+	{
+		var tab = serif ? SerifWidths : SansWidths;
+		double u = 0;
+		foreach (var c in s) u += c >= ' ' && c <= '~' ? tab[c - ' '] : 556;
+		return u / 1000 * h * (serif ? SerifEmPerCap : SansEmPerCap);
+	}
+
+	// Greedy word wrap of one paragraph to width; leading spaces (indents) stay on the first line.
+	static IEnumerable<string> Wrap(string para, double h, double width, bool serif)
+	{
+		if (TextWidth(para, h, serif) <= width) { yield return para; yield break; }
+		var line = new StringBuilder();
+		int i = 0;
+		while (i < para.Length)
+		{
+			int ws = i;
+			while (i < para.Length && para[i] == ' ') i++;
+			int we = i;
+			while (i < para.Length && para[i] != ' ') i++;
+			if (we == i) break; // trailing spaces
+			var word = para.Substring(we, i - we);
+			if (line.Length > 0 && TextWidth(line + para.Substring(ws, i - ws), h, serif) > width)
+			{
+				yield return line.ToString();
+				line.Clear().Append(word);
+			}
+			else line.Append(para, ws, i - ws);
+		}
+		if (line.Length > 0) yield return line.ToString();
 	}
 
 	void EmitInsert(Insert ins, Affine t, int layer, int rgb)
