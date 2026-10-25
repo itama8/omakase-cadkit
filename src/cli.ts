@@ -149,7 +149,10 @@ async function cmdQuery(store: DrawingStore, file: string, flags: Flags) {
 function printFinding(f: Finding, i: number) {
   const sev = f.severity === "error" ? "ERROR  " : f.severity === "warning" ? "WARN   " : "info   ";
   const hs = f.handles.length ? `  [${f.handles.slice(0, 6).join(" ")}${f.handles.length > 6 ? ` +${f.handles.length - 6}` : ""}]` : "";
-  console.log(`${String(i).padStart(3)} ${sev}${f.rule}: ${f.message}${hs}`);
+  console.log(`${String(i).padStart(3)} ${sev}${f.title ?? f.message}  (${f.rule})`);
+  if (f.title) console.log(`           ${f.message}`);
+  for (const s of f.fix ?? []) console.log(`           fix: ${s.command ? s.command + " — " : ""}${s.text}`);
+  if (hs) console.log(`         ${hs}`);
 }
 
 async function cmdLint(store: DrawingStore, files: string[], flags: Flags) {
@@ -176,7 +179,7 @@ async function cmdLint(store: DrawingStore, files: string[], flags: Flags) {
     }
     if (setFindings.length) {
       console.log(`\nacross the set`);
-      setFindings.forEach((f, i) => printFinding({ ...f, message: `${path.basename(f.file ?? "")}: ${f.message}` }, i + 1));
+      setFindings.forEach((f, i) => printFinding({ ...f, title: `${path.basename(f.file ?? "")}: ${f.title ?? f.message}` }, i + 1));
     }
   }
   return errors > 0 ? 1 : 0;

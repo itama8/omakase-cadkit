@@ -39,8 +39,9 @@ export interface Frame {
   rawRatio: number;
   /** True when the measured scale is a standard scale, false when it is the raw fit. */
   snapped: boolean;
-  /** Where the paper size came from. */
-  paperSource: "profile" | "iso-fit" | "assumed";
+  /** Where the paper size came from. "declared": no profile paper, but the frame fits a
+   *  standard sheet at the scale its title block declares, so that sheet is taken. */
+  paperSource: "profile" | "iso-fit" | "declared" | "assumed";
   declared: DeclaredScale | null;
   drawingNumber: { text: string; handle: string } | null;
 }
@@ -229,10 +230,27 @@ export function analyzeSheet(d: Drawing, cfg: Config): SheetInfo {
       raw = Math.max(long / pw, short / ph);
       measured = snapScale(raw, 0.08);
     }
+    const inside = texts.filter((t) => t.ins && pointIn(b, t.ins));
+    const declared = declaredScaleIn(inside);
+    if (!cfg.paper && declared) {
+      // A declared scale at which the frame fills a standard sheet beats a guessed sheet.
+      let best: { p: string; fit: number; r: number; err: number } | null = null;
+      for (const r of declared.ratios)
+        for (const [p, [pw, ph]] of Object.entries(PAPERS)) {
+          const fit = Math.max(long / pw, short / ph);
+          const err = Math.abs(fit - r) / r;
+          if (err <= 0.08 && (!best || err < best.err)) best = { p, fit, r, err };
+        }
+      if (best) {
+        paper = best.p;
+        paperSource = "declared";
+        raw = best.fit;
+        measured = best.r;
+      }
+    }
     const snapped = measured !== null;
     // an unsnapped fit is still a measurement: keep two significant figures
     if (measured === null) measured = Number(raw.toPrecision(2));
-    const inside = texts.filter((t) => t.ins && pointIn(b, t.ins));
     return {
       handle: e.h,
       bbox: b,
@@ -244,7 +262,7 @@ export function analyzeSheet(d: Drawing, cfg: Config): SheetInfo {
       rawRatio: raw,
       snapped,
       paperSource,
-      declared: declaredScaleIn(inside),
+      declared,
       drawingNumber: drawingNumberIn(inside, cfg),
     };
   });

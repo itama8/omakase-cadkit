@@ -65,7 +65,8 @@ export function cap(findings: Finding[], max: number, ruleId: string): Finding[]
   kept.push({
     rule: ruleId,
     severity: "info",
-    message: `${rest.length} more ${ruleId} findings not listed (limit ${max})`,
+    title: `${rest.length} more ${ruleId} findings not listed`,
+    message: `Only the first ${max} findings of each rule are listed; fix the shown ones and re-run, or raise the limit with --max.`,
     handles: rest.flatMap((f) => f.handles).slice(0, 200),
   });
   return kept;
@@ -78,7 +79,7 @@ export function lintContext(ctx: LintContext, opts: { packs?: string[]; maxPerRu
   const ruleErrors: { rule: string; error: string }[] = [];
   for (const r of rules) {
     try {
-      const out = r.run(ctx).map((f) => ({ ...f, file: ctx.file }));
+      const out = r.run(ctx).map((f) => ({ ...f, title: f.title ?? r.title, file: ctx.file }));
       findings.push(...cap(out, opts.maxPerRule ?? 200, r.id));
     } catch (err: any) {
       ruleErrors.push({ rule: r.id, error: String(err?.stack ?? err) });
@@ -114,6 +115,8 @@ export const SET_RULES: SetRule[] = [
           out.push({
             rule: "drawing-number-duplicate",
             severity: "error",
+            title: `Drawing number ${num} is also used by another sheet`,
+            fix: [{ command: "TEXTEDIT", text: "Give each sheet its own number." }],
             message: `Drawing number ${num} also appears in ${uses.filter((x) => x !== u).map((x) => x.file.split("/").pop()).join(", ")}`,
             handles: [u.handle],
             file: u.file,

@@ -246,7 +246,7 @@ sealed class Payload
 		var w = _w;
 		var h = _doc.Header;
 		w.WriteStartObject();
-		w.WriteNumber("schema", 5);
+		w.WriteNumber("schema", 6);
 		w.WriteStartObject("source");
 		w.WriteString("path", path);
 		w.WriteString("format", Path.GetExtension(path).TrimStart('.').ToLowerInvariant());
@@ -276,6 +276,7 @@ sealed class Payload
 			w.WriteBoolean("on", l.IsOn);
 			w.WriteBoolean("frozen", (l.Flags & LayerFlags.Frozen) != 0);
 			w.WriteBoolean("locked", (l.Flags & LayerFlags.Locked) != 0);
+			w.WriteBoolean("plot", l.PlotFlag && !l.Name.Equals("Defpoints", StringComparison.OrdinalIgnoreCase));
 			w.WriteString("lineType", l.LineType?.Name ?? "");
 			w.WriteNumber("entities", counts.GetValueOrDefault(l.Name));
 			w.WriteEndObject();

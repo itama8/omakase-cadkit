@@ -4,12 +4,33 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { padBbox, unionBbox } from "../geometry.ts";
 import { shortUnit, workingScale } from "../sheet.ts";
-import type { Entity, Finding } from "../types.ts";
+import type { Entity, Finding, FixStep } from "../types.ts";
 import type { LintContext, Rule } from "./engine.ts";
 
 const fmt = (n: number, d = 2) => (Math.abs(n) >= 100 ? Math.round(n).toLocaleString("en-US") : n.toFixed(d));
 const isText = (e: Entity) => (e.type === "TEXT" || e.type === "MTEXT" || e.type === "ATTRIB") && typeof e.text === "string";
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
+const count = (n: number, one: string, many = one + "s") => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
+/** A paper length in mm, as metres once it passes a metre. */
+const paperLen = (mm: number) => (mm >= 1000 ? `${fmt(mm / 1000, 1)} m` : `${Math.round(mm)} mm`);
+const INSUNITS: Record<string, number> = { in: 1, ft: 2, mm: 4, cm: 5, m: 6 };
+const UNIT_WORD: Record<string, string> = { in: "inches", ft: "feet", mm: "millimetres", cm: "centimetres", m: "metres" };
+/** What the entities are, for headlines: "polylines", "block hp references". */
+function kindWord(type: string, n: number, block?: string): string {
+  const one = n === 1;
+  switch (type) {
+    case "LINE": return one ? "line" : "lines";
+    case "LWPOLYLINE":
+    case "POLYLINE": return one ? "polyline" : "polylines";
+    case "CIRCLE": return one ? "circle" : "circles";
+    case "ARC": return one ? "arc" : "arcs";
+    case "POINT": return one ? "point" : "points";
+    case "TEXT":
+    case "MTEXT": return one ? "text" : "texts";
+    case "INSERT": return `block ${block ?? "?"} ${one ? "reference" : "references"}`;
+    default: return type;
+  }
+}
 
 function bboxOf(ctx: LintContext, handles: string[], limit = 400) {
   return unionBbox(handles.slice(0, limit).map((h) => ctx.byHandle.get(h)?.bbox));
@@ -28,7 +49,9 @@ const unitsDeclared: Rule = {
       out.push({
         rule: this.id,
         severity: "error",
-        message: `$INSUNITS is ${u.declared}, but the coordinates are projected metres (eastings ${fmt(ctx.sheet.extents![0])}–${fmt(ctx.sheet.extents![2])}). Anything that trusts the header scales this drawing by ${u.declared === "Inches" ? "0.0254" : "the wrong factor"}.`,
+        title: `Drawing units are set to ${UNIT_WORD[shortUnit(u.declared)] ?? u.declared.toLowerCase()}, but the coordinates are in metres`,
+        message: `$INSUNITS is ${u.declared}; the coordinates are projected metres (eastings ${fmt(ctx.sheet.extents![0])}–${fmt(ctx.sheet.extents![2])}). Inserting, xref-ing or exporting this drawing scales it by the wrong factor.`,
+        fix: [{ command: "INSUNITS", text: "Set it to 6 (metres). Only the declared unit changes; nothing moves." }],
         handles: [],
         bbox: ctx.sheet.extents ?? undefined,
         data: { declared: u.declared, used: u.used },
@@ -37,11 +60,23 @@ const unitsDeclared: Rule = {
       out.push({
         rule: this.id,
         severity: "warning",
-        message: `$INSUNITS is ${u.declared}; the project profile says ${u.used}. The file still carries the wrong header.`,
+        title: `Drawing units are set to ${UNIT_WORD[shortUnit(u.declared)] ?? u.declared.toLowerCase()}, but this project uses ${UNIT_WORD[u.used] ?? u.used}`,
+        message: `$INSUNITS is ${u.declared}; the project profile says ${u.used}. This review uses ${u.used}, but the file still carries the wrong header.`,
+        fix: [{ command: "INSUNITS", text: `Set it to ${INSUNITS[u.used] ?? "the code for " + u.used} (${UNIT_WORD[u.used] ?? u.used}). Only the declared unit changes; nothing moves.` }],
         handles: [],
       });
     } else if (/unitless/i.test(u.declared) && u.source !== "config") {
-      out.push({ rule: this.id, severity: "info", message: `No units declared; plotted sizes assume ${u.used}. Set "units" in omakase-cadkit.json.`, handles: [] });
+      out.push({
+        rule: this.id,
+        severity: "info",
+        title: "The drawing does not say what unit it is in",
+        message: `$INSUNITS is Unitless; this review assumes ${u.used} for plotted sizes.`,
+        fix: [
+          { command: "INSUNITS", text: "Set the real unit: 4 for millimetres, 6 for metres." },
+          { text: "Or choose the unit in this viewer's Properties panel (sliders icon) so the review uses it." },
+        ],
+        handles: [],
+      });
     }
     return out;
   },
@@ -55,17 +90,27 @@ const sheetFrame: Rule = {
   run(ctx) {
     const out: Finding[] = [];
     if (ctx.sheet.frames.length === 0) {
-      out.push({ rule: this.id, severity: "info", message: "No sheet frame with a title block was found; scale and text-size checks were skipped.", handles: [] });
+      out.push({ rule: this.id, severity: "info", title: "No sheet border with a title block found", message: "Scale and plotted text-size checks need a border with a title block, so they were skipped.", handles: [] });
       return out;
     }
     for (const f of ctx.sheet.frames) {
       if (!f.drawingNumber)
-        out.push({ rule: this.id, severity: "warning", message: "Frame has a title block but no drawing number was found in it.", handles: [f.handle], bbox: f.bbox });
-      if (!f.isoRatio)
+        out.push({
+          rule: this.id,
+          severity: "warning",
+          title: "The title block has no drawing number",
+          message: "No DRAWING NO / DRG NO label with a number was found inside the sheet border.",
+          fix: [{ command: "TEXTEDIT", text: "Add the drawing number next to the DRAWING NO label in the title block." }],
+          handles: [f.handle],
+          bbox: f.bbox,
+        });
+      if (!f.isoRatio && f.paperSource !== "profile" && f.paperSource !== "declared")
         out.push({
           rule: this.id,
           severity: "info",
-          message: `Frame is ${fmt(f.widthMm / 1000, 1)} × ${fmt(f.heightMm / 1000, 1)} m of drawing, not an ISO sheet ratio; scale is judged as fitted to ${f.paper}.`,
+          title: `The sheet border is not a standard paper shape, so the scale assumes it fills ${f.paper}`,
+          message: `Border is ${fmt(f.widthMm / 1000, 1)} × ${fmt(f.heightMm / 1000, 1)} m of drawing; ISO sheets are 1 : 1.41. Scale and text-size checks use 1:${fmt(f.measured ?? 0, 0)} on ${f.paper}.`,
+          fix: [{ text: `If the sheet is not printed on ${f.paper}, set "paper" (A0–A4) in omakase-cadkit.json beside the drawing.` }],
           handles: [f.handle],
           bbox: f.bbox,
         });
@@ -73,7 +118,14 @@ const sheetFrame: Rule = {
     const nums = ctx.sheet.frames.map((f) => f.drawingNumber?.text).filter(Boolean) as string[];
     const dup = nums.filter((n, i) => nums.indexOf(n) !== i);
     for (const n of new Set(dup))
-      out.push({ rule: this.id, severity: "error", message: `Drawing number ${n} is used by more than one frame in this file.`, handles: ctx.sheet.frames.filter((f) => f.drawingNumber?.text === n).map((f) => f.drawingNumber!.handle) });
+      out.push({
+        rule: this.id,
+        severity: "error",
+        title: `Drawing number ${n} is on more than one sheet in this file`,
+        message: `${ctx.sheet.frames.filter((f) => f.drawingNumber?.text === n).length} title blocks carry ${n}.`,
+        fix: [{ command: "TEXTEDIT", text: "Give each sheet its own number." }],
+        handles: ctx.sheet.frames.filter((f) => f.drawingNumber?.text === n).map((f) => f.drawingNumber!.handle),
+      });
     return out;
   },
 };
@@ -88,21 +140,47 @@ const scaleMismatch: Rule = {
     for (const f of ctx.sheet.frames) {
       const d = f.declared;
       if (!d) {
-        out.push({ rule: this.id, severity: "warning", message: "Title block has no SCALE entry.", handles: [f.handle], bbox: f.bbox });
+        out.push({
+          rule: this.id,
+          severity: "warning",
+          title: "The title block does not state a scale",
+          message: `No SCALE label was found inside the border. The border is drawn for 1:${fmt(f.measured ?? 0, 0)} on ${f.paper}.`,
+          fix: [{ command: "TEXT", text: `Add "SCALE 1:${fmt(f.measured ?? 0, 0)}" (or NTS) to the title block.` }],
+          handles: [f.handle],
+          bbox: f.bbox,
+        });
         continue;
       }
       if (d.nts && d.ratios.length === 0) continue;
       if (d.ratios.length === 0) {
-        out.push({ rule: this.id, severity: "warning", message: "SCALE label has no ratio next to it.", handles: d.handles, bbox: bboxOf(ctx, d.handles) });
+        out.push({
+          rule: this.id,
+          severity: "warning",
+          title: "The SCALE label in the title block has no ratio",
+          message: `No 1:N value sits next to the SCALE label. The border is drawn for 1:${fmt(f.measured ?? 0, 0)} on ${f.paper}.`,
+          fix: [{ command: "TEXTEDIT", text: `Write the ratio, e.g. 1:${fmt(f.measured ?? 0, 0)}, next to SCALE.` }],
+          handles: d.handles,
+          bbox: bboxOf(ctx, d.handles),
+        });
         continue;
       }
       if (!f.measured) continue;
       const ok = d.ratios.some((r) => Math.abs(r - f.measured!) / f.measured! <= 0.1);
       if (!ok) {
+        const said = d.ratios.map((r) => "1:" + fmt(r, 0)).join(", ");
+        const real = `${f.snapped ? "1:" : "≈1:"}${fmt(f.measured, f.measured < 20 ? 1 : 0)}`;
+        const guessed = f.paperSource === "profile" ? "" : f.paperSource === "iso-fit" ? " (paper guessed from the border's shape)" : " (paper assumed)";
+        const fixes: FixStep[] = [
+          { command: "TEXTEDIT", text: `If the sheet is printed at ${real}, correct the scale in the title block to ${real}.` },
+          { text: `If ${"1:" + fmt(d.ratios[0], 0)} is intended, the content does not fit this sheet at that scale: split it across sheets, or print it through a layout viewport at that scale.` },
+        ];
+        if (f.paperSource !== "profile") fixes.push({ text: `If the sheet is not printed on ${f.paper}, set "paper" in omakase-cadkit.json beside the drawing; this check uses it.` });
         out.push({
           rule: this.id,
           severity: "error",
-          message: `Declares ${d.ratios.map((r) => "1:" + fmt(r, 0)).join(", ")} but the frame plots at ${f.snapped ? "1:" : "≈1:"}${fmt(f.measured, f.measured < 20 ? 1 : 0)} on ${f.paper}${f.paperSource === "profile" ? "" : f.paperSource === "iso-fit" ? " (paper guessed from the frame; set \"paper\" in omakase-cadkit.json)" : " (paper assumed; set \"paper\" in omakase-cadkit.json)"} — ${fmt(Math.max(f.widthMm, f.heightMm) / 1000, 1)} m of drawing across the sheet. Off by a factor of ${fmt(Math.max(d.ratios[0], f.measured) / Math.min(d.ratios[0], f.measured), 1)}.`,
+          title: `Title block says ${said}, but the border is drawn for ${real} on ${f.paper}${guessed}`,
+          message: `At ${"1:" + fmt(d.ratios[0], 0)} this border would print ${paperLen(f.widthMm / d.ratios[0])} × ${paperLen(f.heightMm / d.ratios[0])}, ${f.paperSource === "profile" ? `not ${f.paper}` : "which is no standard sheet"}. At ${real} it prints ${paperLen(f.widthMm / f.measured)} × ${paperLen(f.heightMm / f.measured)}. Measurements scaled off the print at ${said} are off by a factor of ${fmt(Math.max(d.ratios[0], f.measured) / Math.min(d.ratios[0], f.measured), 1)}.`,
+          fix: fixes,
           handles: [...d.handles, f.handle],
           bbox: bboxOf(ctx, d.handles) ? padBbox(bboxOf(ctx, d.handles)!, 2) : f.bbox,
           data: { declared: d.ratios, measured: f.measured, raw: f.rawRatio, paper: f.paper },
@@ -122,12 +200,16 @@ const textHeightPaper: Rule = {
     const out: Finding[] = [];
     const min = ctx.cfg.minTextMm;
     const mm = ctx.sheet.units.mmPerUnit;
+    // text on layers that never print cannot be too small on paper
+    const printing = ctx.drawing.layers.map((l) => l.on && !l.frozen && l.plot !== false);
     for (const f of ctx.sheet.frames) {
       const scale = workingScale(f);
       if (!scale) continue;
+      // a scale resting on a guessed paper size is not firm enough to call an error
+      const firm = f.paperSource === "profile" || f.paperSource === "declared";
       const groups = new Map<string, { hs: number[]; handles: string[] }>();
       for (const e of ctx.drawing.entities) {
-        if (!isText(e) || !e.ins || !(e.height! > 0) || !e.text!.trim()) continue;
+        if (!isText(e) || !e.ins || !(e.height! > 0) || !e.text!.trim() || printing[e.layer] === false) continue;
         if (e.ins[0] < f.bbox[0] || e.ins[0] > f.bbox[2] || e.ins[1] < f.bbox[1] || e.ins[1] > f.bbox[3]) continue;
         const paper = (e.height! * mm) / scale;
         if (paper >= min) continue;
@@ -140,10 +222,16 @@ const textHeightPaper: Rule = {
       for (const [layer, g] of groups) {
         const lo = Math.min(...g.hs), hi = Math.max(...g.hs);
         const range = Math.abs(hi - lo) < 0.005 ? `${lo.toFixed(2)} mm` : `${lo.toFixed(2)}–${hi.toFixed(2)} mm`;
+        const need = `${fmt((min * scale) / mm, 2)} ${ctx.sheet.units.used}`;
         out.push({
           rule: this.id,
-          severity: hi < min * 0.75 ? "error" : "warning",
-          message: `${g.handles.length} text${g.handles.length > 1 ? "s" : ""} on layer ${layer} plot at ${range} (1:${fmt(scale, 0)}); minimum is ${min} mm. Needs height ≥ ${fmt((min * scale) / mm, 2)} ${ctx.sheet.units.used} or a larger scale.`,
+          severity: hi < min * 0.75 && firm ? "error" : "warning",
+          title: `${count(g.handles.length, "text")} on layer ${layer} will print ${range} tall`,
+          message: `At 1:${fmt(scale, 0)} on ${f.paper}${firm ? "" : " (paper not confirmed)"} these print at ${range}; readable site prints need at least ${min} mm, which is ${need} in the drawing.`,
+          fix: [
+            { command: "LAYER", text: `If these should not print, set layer ${layer} to No Plot (or freeze it).` },
+            { command: "SCALETEXT", text: `If they should print, scale them to a height of at least ${need}.` },
+          ],
           handles: g.handles,
           bbox: bboxOf(ctx, g.handles, 50),
           data: { layer, paperMm: [lo, hi], scale, count: g.handles.length },
@@ -205,7 +293,7 @@ const duplicates: Rule = {
     for (const hs of groups.values()) {
       if (hs.length < 2) continue;
       const e = ctx.byHandle.get(hs[0])!;
-      const fam = `${e.type}${e.block ? " " + e.block : ""} on layer ${ctx.layerName(e)}`;
+      const fam = `${e.type}|${e.block ?? ""}|${ctx.layerName(e)}`;
       const arr = families.get(fam) ?? [];
       arr.push(hs);
       families.set(fam, arr);
@@ -214,10 +302,16 @@ const duplicates: Rule = {
     for (const [fam, sets] of families) {
       const extra = sets.reduce((s, hs) => s + hs.length - 1, 0);
       const handles = sets.flatMap((hs) => hs.slice(1));
+      const [type, block, layer] = fam.split("|");
       out.push({
         rule: this.id,
         severity: "warning",
-        message: `${extra} duplicate ${fam} (${sets.length} location${sets.length > 1 ? "s" : ""} with stacked copies).`,
+        title: `Layer ${layer} has ${extra.toLocaleString("en-US")} duplicate ${kindWord(type, extra, block)}`,
+        message: `${extra === 1 ? "It sits" : "Each sits"} exactly on an identical ${type} (${count(sets.length, "place")}). Copies double quantities and plotted line weight, and an edit to one copy leaves the other behind.`,
+        fix: [
+          { command: "ERASE", text: "Erase the selected entities. The selection holds only the extra copies; one of each stays." },
+          { command: "OVERKILL", text: `Or run OVERKILL on layer ${layer} to remove copies and overlapping segments together.` },
+        ],
         handles,
         bbox: bboxOf(ctx, handles, 200),
         data: { family: fam, locations: sets.length, extra, sets: sets.slice(0, 500) },
@@ -242,7 +336,15 @@ const externalDeps: Rule = {
         arr.push(e.h);
         images.set(e.file ?? "", arr);
       } else if (e.type === "OLE2FRAME") {
-        out.push({ rule: this.id, severity: "info", message: "Embedded OLE object: most viewers and plot services show only its frame.", handles: [e.h], bbox: e.bbox });
+        out.push({
+          rule: this.id,
+          severity: "info",
+          title: "Embedded OLE object (e.g. a pasted Excel table) may not print",
+          message: "Most viewers, plot services and PDF exports outside AutoCAD show only its frame.",
+          fix: [{ command: "TABLE", text: "If it must appear on the issued sheet, rebuild it as an AutoCAD table (or link the Excel range with DATALINK)." }],
+          handles: [e.h],
+          bbox: e.bbox,
+        });
       }
     }
     for (const [file, hs] of images) {
@@ -251,9 +353,13 @@ const externalDeps: Rule = {
       out.push({
         rule: this.id,
         severity: found ? "warning" : "error",
+        title: found ? `Image ${base} is linked from a separate file` : `Linked image ${base} is missing`,
         message: found
-          ? `Raster ${base} is linked, not embedded (${hs.length} reference${hs.length > 1 ? "s" : ""}); the sheet breaks if it is issued without the file.`
-          : `Raster ${base} is linked but missing (looked for ${file}); ${hs.length} reference${hs.length > 1 ? "s" : ""} will plot empty.`,
+          ? `${count(hs.length, "reference")} point at ${file}. The sheet loses the image if it is issued without that file.`
+          : `${count(hs.length, "reference")} point at ${file}, which was not found; they plot empty.`,
+        fix: found
+          ? [{ command: "ETRANSMIT", text: "Issue the drawing as a transmittal package so the image travels with it." }]
+          : [{ command: "EXTERNALREFERENCES", text: "Select the image, then set Found At to where it now lives, or Detach it if it is no longer needed." }],
         handles: hs,
         bbox: bboxOf(ctx, hs),
         data: { file, resolved: found ?? null },
@@ -266,7 +372,11 @@ const externalDeps: Rule = {
       out.push({
         rule: this.id,
         severity: found ? "warning" : "error",
-        message: found ? `External reference ${b.name} (${p}).` : `External reference ${b.name} is missing (${p || "no path"}).`,
+        title: found ? `Drawing ${b.name} is attached as an external reference` : `External reference ${b.name} is missing`,
+        message: found ? `Its content lives in ${p}; the sheet loses it if issued without that file.` : `Looked for ${p || "(no path)"}; its content does not appear on this sheet.`,
+        fix: found
+          ? [{ command: "EXTERNALREFERENCES", text: "Bind it (right-click → Bind) to make the sheet self-contained, or issue with ETRANSMIT." }]
+          : [{ command: "EXTERNALREFERENCES", text: "Select it, then set Found At to where the file now lives, or Detach it." }],
         handles: ctx.drawing.entities.filter((e) => e.type === "INSERT" && e.block === b.name).map((e) => e.h),
       });
     }
@@ -294,7 +404,12 @@ const dimensionOverride: Rule = {
         out.push({
           rule: this.id,
           severity: "error",
-          message: `Dimension reads "${e.text}" but measures ${meas.toFixed(3)} ${ctx.sheet.units.used} (×${(v / meas).toFixed(3)}).`,
+          title: `Dimension says ${e.text.replace(/\\[A-Za-z][^;]*;|[{}]/g, "")} but the geometry measures ${meas.toFixed(3)} ${ctx.sheet.units.used}`,
+          message: `Its text is typed over with "${e.text}"; the measured value is ${meas.toFixed(3)} ${ctx.sheet.units.used} (×${(v / meas).toFixed(3)}).`,
+          fix: [
+            { command: "PROPERTIES", text: "Clear Text override (or set it to <>) so the dimension shows what it measures." },
+            { text: "If the typed value is the design value, change the geometry to match instead." },
+          ],
           handles: [e.h],
           bbox: e.bbox,
           data: { text: e.text, measurement: meas },
@@ -315,7 +430,12 @@ const hiddenLayers: Rule = {
       .map((l) => ({
         rule: this.id,
         severity: "info" as const,
-        message: `${l.entities} entities on layer ${l.name}, which is ${l.frozen ? "frozen" : "off"}.`,
+        title: `Layer ${l.name} is ${l.frozen ? "frozen" : "off"} but holds ${count(l.entities, "entity", "entities")}`,
+        message: "Hidden content travels with the file and reappears when someone turns the layer on.",
+        fix: [
+          { command: l.frozen ? "LAYTHW" : "LAYON", text: "Show it to see what is there." },
+          { command: "LAYDEL", text: "Delete the layer and its content if it is obsolete; leave it if it is deliberate working data." },
+        ],
         handles: ctx.drawing.entities.filter((e) => ctx.layerName(e) === l.name).slice(0, 200).map((e) => e.h),
       }));
   },
@@ -333,8 +453,9 @@ const degenerate: Rule = {
       if ((e.type === "LINE" || e.type === "LWPOLYLINE" || e.type === "POLYLINE") && e.len !== undefined && e.len < 1e-6) zero.push(e.h);
     }
     const out: Finding[] = [];
-    if (empty.length) out.push({ rule: this.id, severity: "info", message: `${empty.length} empty text entities.`, handles: empty, bbox: bboxOf(ctx, empty) });
-    if (zero.length) out.push({ rule: this.id, severity: "info", message: `${zero.length} zero-length lines or polylines.`, handles: zero, bbox: bboxOf(ctx, zero) });
+    const erase = [{ command: "ERASE", text: "Erase the selected entities; nothing visible is lost." }];
+    if (empty.length) out.push({ rule: this.id, severity: "info", title: `${count(empty.length, "empty text")} with nothing in them`, message: "Invisible text inflates the file and gets picked up by selections and take-offs.", fix: erase, handles: empty, bbox: bboxOf(ctx, empty) });
+    if (zero.length) out.push({ rule: this.id, severity: "info", title: `${count(zero.length, "line or polyline", "lines or polylines")} with zero length`, message: "Zero-length geometry is invisible but snaps, counts in take-offs and confuses selection.", fix: erase, handles: zero, bbox: bboxOf(ctx, zero) });
     return out;
   },
 };
@@ -361,7 +482,9 @@ const outsideFrame: Rule = {
     return [...byLayer].map(([layer, hs]) => ({
       rule: this.id,
       severity: "warning" as const,
-      message: `${hs.length} entities on layer ${layer} sit outside the sheet frame.`,
+      title: `${count(hs.length, "entity", "entities")} on layer ${layer} ${hs.length === 1 ? "lies" : "lie"} outside the sheet border`,
+      message: `${hs.length === 1 ? "It does" : "They do"} not appear when the sheet is printed to its border, or ${hs.length === 1 ? "it prints" : "they print"} where nothing should be.`,
+      fix: [{ command: "MOVE", text: "Move inside the border if it belongs on this sheet; ERASE leftovers." }],
       handles: hs,
       bbox: bboxOf(ctx, hs),
     }));
@@ -376,7 +499,8 @@ const unrendered: Rule = {
   run(ctx) {
     const u = Object.entries(ctx.drawing.unrendered);
     if (!u.length) return [];
-    return [{ rule: this.id, severity: "info", message: `Not drawn: ${u.map(([k, v]) => `${v} ${k}`).join(", ")}.`, handles: [] }];
+    const n = u.reduce((s, [, v]) => s + v, 0);
+    return [{ rule: this.id, severity: "info", title: `${count(n, "entity", "entities")} not shown in this viewer`, message: `Not drawn: ${u.map(([k, v]) => `${v} ${k}`).join(", ")}. Check them in AutoCAD; this review does not cover them.`, handles: [] }];
   },
 };
 

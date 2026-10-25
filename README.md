@@ -78,8 +78,11 @@ or `#f=N`, so an agent can hand over an exact place.
 
 Drag with the left or middle button to pan; use the wheel or the +/− buttons to zoom.
 The drawing toolbar includes Fit, Back (also `Alt+Left`), and buttons to hide either side
-panel. Selecting a finding keeps the finding list open and highlights it on the drawing;
-enable **Show all finding markers** to see the other findings too. Re-running lint preserves your view.
+panel. Selecting a finding keeps the finding list open, highlights it on the drawing and
+shows **How to fix**: AutoCAD commands with what each does, plus icon buttons for **Copy AutoCAD selection**
+(AutoLISP to paste at the command line; needs full AutoCAD or LT 2024+) and **Copy handles**.
+Every copy opens a popup showing exactly what went to the clipboard; it stays until closed.
+Enable **Show all finding markers** to see the other findings too. Re-running lint preserves your view.
 Use the sliders icon in the header (or click the unit badge) to open **Drawing properties**.
 Choose `mm`, `cm`, `m`, `in`, `ft`, or **Auto**, then Apply. The ruler previews the unit size;
 the badge, sheet facts and findings update immediately. This saves a profile beside the drawing

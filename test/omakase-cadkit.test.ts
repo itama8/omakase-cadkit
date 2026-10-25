@@ -67,7 +67,7 @@ describe("paths", () => {
 describe("payload", () => {
   test("sidecar reads a DXF into entities and render primitives", async () => {
     const { drawing: d } = await store.open(path.join(FIX, "sewer_clean.dxf"));
-    assert.equal(d.schema, 5);
+    assert.equal(d.schema, 6);
     assert.equal(d.header.insUnits, "Meters");
     const mh = d.entities.filter((e) => e.type === "INSERT" && e.block === "MH");
     assert.equal(mh.length, 5);
@@ -148,9 +148,13 @@ describe("lint", () => {
       "text-height-paper",
     ]);
     assert.deepEqual(rules(result.findings, "warning"), ["duplicate-entities", "sewer-connectivity"]);
-    const msg = (r: string) => result.findings.find((f) => f.rule === r)!.message;
-    assert.match(msg("sewer-levels"), /MH 3: depth label 1\.00 m but GL 22\.20 − IL 20\.40 = 1\.80 m/);
-    assert.match(msg("sewer-pipe-label"), /Pipe 4: labelled 25\.0 m, drawn 30\.0 m/);
+    const msg = (r: string) => {
+      const f = result.findings.find((f) => f.rule === r)!;
+      assert.ok(f.title, `${r} has no headline`);
+      return `${f.title}. ${f.message}`;
+    };
+    assert.match(msg("sewer-levels"), /^MH 3: depth label does not equal ground level minus invert\. Depth label 1\.00 m, but GL 22\.20 − IL 20\.40 = 1\.80 m/);
+    assert.match(msg("sewer-pipe-label"), /Pipe 4: label says 25\.0 m, drawn pipe is 30\.0 m/);
     assert.match(msg("sewer-gradient"), /Pipe 3 \(3 → 4\): flow arrow points uphill/);
     assert.match(msg("sewer-connectivity"), /MH 9 has no pipe/);
     assert.match(msg("text-height-paper"), /0\.60 mm/);
@@ -167,7 +171,36 @@ describe("lint", () => {
   test("a wrong scale label is an error", async () => {
     const { result } = await lintFile(path.join(FIX, "scale_wrong.dxf"));
     assert.deepEqual(rules(result.findings), ["scale-mismatch"]);
-    assert.match(result.findings[0].message, /Declares 1:100 but the frame plots at 1:500 on A1/);
+    assert.equal(result.findings[0].title, "Title block says 1:100, but the border is drawn for 1:500 on A1");
+    assert.match(result.findings[0].message, /At 1:100 this border would print 4\.2 m × 3\.0 m, not A1\. At 1:500 it prints 841 mm × 594 mm/);
+    assert.ok(result.findings[0].fix?.some((s) => s.command === "TEXTEDIT"));
+  });
+
+  test("every finding has a headline, and fix steps name a command or say what to do", async () => {
+    const { result } = await lintFile(path.join(FIX, "sewer_bad.dxf"));
+    for (const f of result.findings) {
+      assert.ok(f.title && f.title !== f.message, `${f.rule} has no headline of its own`);
+      for (const s of f.fix ?? []) assert.ok(s.text.length > 10, `${f.rule} has an empty fix step`);
+    }
+  });
+
+  test("text on a layer that does not plot is not too small to read", async () => {
+    const file = path.join(FIX, "sewer_bad.dxf");
+    const { drawing } = await store.open(file);
+    const { result } = await lintFile(file);
+    const small = result.findings.find((f) => f.rule === "text-height-paper")!;
+    const layers = drawing.layers.map((l) => (l.name === (small.data as { layer: string }).layer ? { ...l, plot: false } : l));
+    const after = lintContext(makeContext(file, { ...drawing, layers }, loadConfig(file)));
+    assert.ok(!after.findings.some((f) => f.rule === "text-height-paper" && f.data?.layer === small.data?.layer));
+  });
+
+  test("without a profile paper, the sheet the declared scale fits is taken", async () => {
+    const file = path.join(FIX, "sewer_clean.dxf");
+    const { drawing } = await store.open(file);
+    const ctx = makeContext(file, drawing, { ...loadConfig(file), paper: undefined });
+    assert.equal(ctx.sheet.frames[0].paperSource, "declared");
+    assert.equal(ctx.sheet.frames[0].paper, "A1");
+    assert.equal(ctx.sheet.frames[0].measured, 500);
   });
 
   test("the same drawing number in two files is caught across the set", async () => {
@@ -240,7 +273,7 @@ describe("private drawing (local only)", { skip: !existsSync(PRIVATE_DWG) && "se
     const { ctx, result } = await lintFile(PRIVATE_DWG);
     const f = (rule: string) => result.findings.filter((x) => x.rule === rule);
     assert.equal(ctx.sheet.units.used, "m");
-    assert.match(f("scale-mismatch")[0].message, /Declares 1:100 but the frame plots at 1:2,000 on A0/);
+    assert.match(f("scale-mismatch")[0].title!, /Title block says 1:100, but the border is drawn for 1:2,000 on A0/);
     assert.match(f("units-declared")[0].message, /\$INSUNITS is Inches/);
     assert.equal(f("sewer-stacked-manholes").length, 3, "three stacked outfall flag groups");
     // crowded labels pair the way the hydraulic model does (checked against manholes.shp/pipes.shp):

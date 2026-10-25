@@ -182,7 +182,7 @@ export class Cadkit {
 }
 
 export { entityMatcher, matchesEntity, type EntityFilter } from "./query.ts";
-export type { Bbox, BlockInfo, Drawing, Entity, Finding, Layer, Severity } from "./types.ts";
+export type { Bbox, BlockInfo, Drawing, Entity, Finding, FixStep, Layer, Severity } from "./types.ts";
 export type { Config, FieldLayout, SewerConfig } from "./config.ts";
 export type { LintResult, Rule, SetRule } from "./lint/engine.ts";
 export type { DeclaredScale, Frame, SheetInfo, Units } from "./sheet.ts";

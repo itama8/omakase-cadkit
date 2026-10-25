@@ -305,9 +305,10 @@ const config: Rule = {
   why: "The sewer rules need to know which symbols and labels mean manholes and pipes.",
   run(ctx) {
     const n = net(ctx);
-    if (!n) return [{ rule: this.id, severity: "warning", message: 'The sewer pack is on but omakase-cadkit.json has no "sewer" section; sewer rules were skipped.', handles: [] }];
+    if (!n)
+      return [{ rule: this.id, severity: "warning", title: "Sewer checks are on but not set up", message: 'omakase-cadkit.json turns on the sewer pack but has no "sewer" section, so the sewer checks were skipped.', fix: [{ text: 'Add a "sewer" section naming the manhole blocks, the pipe layer and the label patterns (see fixtures/omakase-cadkit.json).' }], handles: [] }];
     if (n.manholes.length === 0)
-      return [{ rule: this.id, severity: "warning", message: `No manhole symbols found (blocks ${ctx.cfg.sewer!.manhole.blocks.join(", ")}). Check the sewer section of omakase-cadkit.json.`, handles: [] }];
+      return [{ rule: this.id, severity: "warning", title: "No manholes found, so the sewer checks found nothing to check", message: `No inserts of block ${ctx.cfg.sewer!.manhole.blocks.join(", ")}${ctx.cfg.sewer!.manhole.layer ? ` on layer ${ctx.cfg.sewer!.manhole.layer}` : ""}.`, fix: [{ text: 'Click a manhole in the viewer to read its block and layer, then set sewer.manhole.blocks and sewer.manhole.layer in omakase-cadkit.json.' }], handles: [] }];
     return [];
   },
 };
@@ -329,26 +330,30 @@ const manholeLabels: Rule = {
     const far = greedyMatch(pairs);
     const farLabels = new Set([...far.values()].map((x) => x.b));
     for (const [m, { b: o, d }] of far)
-      out.push({ rule: this.id, severity: "warning", message: `MH ${o.id}: label is ${d.toFixed(1)} ${ctx.sheet.units.used} from its symbol; readers will tie it to a neighbour.`, handles: [m.h, o.h], bbox: padBbox([Math.min(m.at[0], o.at[0]), Math.min(m.at[1], o.at[1]), Math.max(m.at[0], o.at[0]), Math.max(m.at[1], o.at[1])], 0.3) });
+      out.push({ rule: this.id, severity: "warning", title: `MH ${o.id}'s label is too far from its manhole`, message: `The label is ${d.toFixed(1)} ${ctx.sheet.units.used} from the nearest unlabelled manhole symbol (expected within ${R} ${ctx.sheet.units.used}); a reader may tie it to a neighbour.`, fix: [{ command: "MOVE", text: "Move the label (number and levels together) next to its manhole." }], handles: [m.h, o.h], bbox: padBbox([Math.min(m.at[0], o.at[0]), Math.min(m.at[1], o.at[1]), Math.max(m.at[0], o.at[0]), Math.max(m.at[1], o.at[1])], 0.3) });
     // a stacked copy of a labelled symbol is reported by sewer-stacked-manholes instead
     const tol = Math.max(0.05, ctx.cfg.sewer!.snapTolerance * 0.2);
     const stackedOnLabelled = (m: Manhole) => n.manholes.some((o) => o !== m && o.id !== null && dist(o.at, m.at) <= tol);
     for (const m of unlabelled)
-      if (!far.has(m) && !stackedOnLabelled(m)) out.push({ rule: this.id, severity: "error", message: "Manhole symbol has no number label nearby.", handles: [m.h], bbox: around(m.at) });
+      if (!far.has(m) && !stackedOnLabelled(m))
+        out.push({ rule: this.id, severity: "error", title: "Manhole without a number", message: `No manhole number label within ${R} ${ctx.sheet.units.used} of this symbol, so it cannot be tied to the schedule or the hydraulic model.`, fix: [{ text: "Add its number and levels from the schedule; ERASE the symbol if it is not a real manhole." }], handles: [m.h], bbox: around(m.at) });
     for (const o of n.orphanLabels)
-      if (!farLabels.has(o)) out.push({ rule: this.id, severity: "warning", message: `Label MH ${o.id} has no manhole symbol within ${R * 3} ${ctx.sheet.units.used}.`, handles: [o.h], bbox: around(o.at) });
+      if (!farLabels.has(o))
+        out.push({ rule: this.id, severity: "warning", title: `Label MH ${o.id} has no manhole`, message: `No manhole symbol within ${R * 3} ${ctx.sheet.units.used} of the label.`, fix: [{ text: "Insert the missing manhole symbol, or ERASE the label if the manhole was deleted." }], handles: [o.h], bbox: around(o.at) });
     for (const m of n.manholes)
       if (m.nearerOther)
         out.push({
           rule: this.id,
           severity: "warning",
+          title: `MH ${m.id}'s label sits closer to ${m.nearerOther.id ? "MH " + m.nearerOther.id : "another manhole"}`,
+          fix: [{ command: "MOVE", text: `Move the MH ${m.id} label next to its own symbol.` }],
           message: `Label MH ${m.id} is ${m.nearerOther.d.toFixed(1)} ${ctx.sheet.units.used} from ${m.nearerOther.id ? "MH " + m.nearerOther.id + "'s" : "another"} symbol but ${m.labelDist!.toFixed(1)} ${ctx.sheet.units.used} from its own; readers will tie it to the wrong manhole.`,
           handles: [m.h, m.labels[0], m.nearerOther.h],
           bbox: unionBbox([around(m.at, 3), ctx.byHandle.get(m.labels[0])?.bbox, ctx.byHandle.get(m.nearerOther.h)?.bbox]),
           data: { own: m.labelDist, other: m.nearerOther.d },
         });
     for (const k of n.keys)
-      out.push({ rule: this.id, severity: "info", message: `Manhole symbol at ${(ctx.byHandle.get(k.h)!.sx ?? 1).toFixed(2)}× scale treated as a legend key, not a node.`, handles: [k.h], bbox: ctx.byHandle.get(k.h)!.bbox });
+      out.push({ rule: this.id, severity: "info", title: "Small manhole symbol treated as a legend key", message: `This symbol is at ${(ctx.byHandle.get(k.h)!.sx ?? 1).toFixed(2)}× scale, much smaller than the others, so it is left out of the network.`, handles: [k.h], bbox: ctx.byHandle.get(k.h)!.bbox });
     const byId = new Map<string, Manhole[]>();
     for (const m of n.manholes) if (m.id) byId.set(m.id, [...(byId.get(m.id) ?? []), m]);
     for (const [id, ms] of byId)
@@ -356,7 +361,9 @@ const manholeLabels: Rule = {
         out.push({
           rule: this.id,
           severity: "error",
-          message: `Manhole number ${id} is used ${ms.length} times.`,
+          title: `Manhole number ${id} is used ${ms.length} times`,
+          message: `${ms.length} manhole symbols carry the label MH ${id}; the schedule and the hydraulic model can only hold one.`,
+          fix: [{ command: "TEXTEDIT", text: "Renumber the duplicates to match the schedule." }],
           handles: ms.map((m) => m.h),
           bbox: unionBbox(ms.map((m) => around(m.at))),
         });
@@ -389,7 +396,9 @@ const stacked: Rule = {
       out.push({
         rule: this.id,
         severity: "error",
-        message: `${near.length + 1} ${m.outfall ? "outfall" : "manhole"} symbols stacked at one point${m.id ? ` (MH ${m.id})` : ""}.`,
+        title: `${near.length + 1} ${m.outfall ? "outfall" : "manhole"} symbols on top of each other${m.id ? ` at MH ${m.id}` : ""}`,
+        message: "Stacked symbols double the manhole count and hide which one carries the data.",
+        fix: [{ command: "ERASE", text: "Erase all but one symbol. The first selected entity is the one this review matched to the label." }],
         handles: [m.h, ...near.map((j) => n.manholes[j].h)],
         bbox: around(m.at),
       });
@@ -412,14 +421,16 @@ const levels: Rule = {
       if (m.outfall) continue;
       const tag = m.id ? `MH ${m.id}` : "Manhole";
       if (m.gl !== undefined && m.il !== undefined && m.il > m.gl)
-        out.push({ rule: this.id, severity: "error", message: `${tag}: invert ${f2(m.il)} is above ground ${f2(m.gl)}.`, handles: [m.h, ...m.labels], bbox: around(m.at) });
+        out.push({ rule: this.id, severity: "error", title: `${tag}: invert level is above ground level`, message: `IL ${f2(m.il)} is above GL ${f2(m.gl)}.`, fix: [{ command: "TEXTEDIT", text: "Correct the levels from the design (SewerGEMS) output; the two values may be swapped." }], handles: [m.h, ...m.labels], bbox: around(m.at) });
       if (m.gl !== undefined && m.il !== undefined && m.depth !== undefined) {
         const calc = m.gl - m.il;
         if (Math.abs(calc - m.depth) > 0.015)
           out.push({
             rule: this.id,
             severity: "error",
-            message: `${tag}: depth label ${f2(m.depth)} m but GL ${f2(m.gl)} − IL ${f2(m.il)} = ${f2(calc)} m.`,
+            title: `${tag}: depth label does not equal ground level minus invert`,
+            message: `Depth label ${f2(m.depth)} m, but GL ${f2(m.gl)} − IL ${f2(m.il)} = ${f2(calc)} m.`,
+            fix: [{ command: "TEXTEDIT", text: "Check the three values against the design output and correct the stale one." }],
             handles: [m.h, ...m.labels],
             bbox: around(m.at),
             data: { gl: m.gl, il: m.il, depth: m.depth, calc },
@@ -427,9 +438,9 @@ const levels: Rule = {
       }
       const d = m.depth ?? (m.gl !== undefined && m.il !== undefined ? m.gl - m.il : undefined);
       if (d !== undefined && c.minDepth !== undefined && d < c.minDepth)
-        out.push({ rule: this.id, severity: "warning", message: `${tag}: depth ${f2(d)} m is below the ${c.minDepth} m minimum.`, handles: [m.h, ...m.labels], bbox: around(m.at), data: { depth: d } });
+        out.push({ rule: this.id, severity: "warning", title: `${tag} is shallower than the ${c.minDepth} m minimum`, message: `Depth ${f2(d)} m; the project minimum (minDepth in omakase-cadkit.json) is ${c.minDepth} m.`, fix: [{ text: "Lower the invert, or record why this manhole is allowed to be shallow (e.g. protection slab)." }], handles: [m.h, ...m.labels], bbox: around(m.at), data: { depth: d } });
       if (d !== undefined && c.maxDepth !== undefined && d > c.maxDepth)
-        out.push({ rule: this.id, severity: "warning", message: `${tag}: depth ${f2(d)} m is above the ${c.maxDepth} m maximum.`, handles: [m.h, ...m.labels], bbox: around(m.at), data: { depth: d } });
+        out.push({ rule: this.id, severity: "warning", title: `${tag} is deeper than the ${c.maxDepth} m maximum`, message: `Depth ${f2(d)} m; the project maximum (maxDepth in omakase-cadkit.json) is ${c.maxDepth} m.`, fix: [{ text: "Review the design here (pumping, drop manhole or a different route), or check the levels are right." }], handles: [m.h, ...m.labels], bbox: around(m.at), data: { depth: d } });
     }
     return out;
   },
@@ -449,14 +460,19 @@ const pipeLabels: Rule = {
       const e = ctx.byHandle.get(p.h)!;
       const mid = pointAlong(p.verts, 0.5).p;
       if (p.id === null) {
-        out.push({ rule: this.id, severity: "warning", message: "Pipe has no number label nearby.", handles: [p.h], bbox: e.bbox ? padBbox(e.bbox, 0.1) : around(mid) });
+        out.push({ rule: this.id, severity: "warning", title: "Pipe without a number", message: `No pipe number label within ${ctx.cfg.sewer!.pipe.labelRadius} ${ctx.sheet.units.used} of this pipe.`, fix: [{ text: "Add its number, length and diameter from the schedule." }], handles: [p.h], bbox: e.bbox ? padBbox(e.bbox, 0.1) : around(mid) });
         continue;
       }
       if (p.labelLen !== undefined && Math.abs(p.labelLen - p.len) > Math.max(0.5, tolF * p.len))
         out.push({
           rule: this.id,
           severity: "error",
-          message: `Pipe ${p.id}: labelled ${p.labelLen.toFixed(1)} m, drawn ${p.len.toFixed(1)} m.`,
+          title: `Pipe ${p.id}: label says ${p.labelLen.toFixed(1)} m, drawn pipe is ${p.len.toFixed(1)} m`,
+          message: `Labelled ${p.labelLen.toFixed(1)} m, drawn ${p.len.toFixed(1)} m (${p.labelLen > p.len ? "+" : "−"}${Math.abs(p.labelLen - p.len).toFixed(1)} m; tolerance ${Math.round(tolF * 100)}% or 0.5 m). Either the label or the alignment is out of date.`,
+          fix: [
+            { command: "LIST", text: "Check the drawn length, then correct the label from the design output." },
+            { text: "If the label is right, the alignment has moved since the design: fix the pipe or its end manholes." },
+          ],
           handles: [p.h, ...p.labels],
           bbox: e.bbox ? padBbox(e.bbox, 0.1) : around(mid),
           data: { label: p.labelLen, drawn: p.len },
@@ -464,7 +480,7 @@ const pipeLabels: Rule = {
     }
     for (const h of n.unlabelledPipeLabels) {
       const t = ctx.byHandle.get(h)!;
-      out.push({ rule: this.id, severity: "warning", message: `Pipe label "${t.text}" is not next to any pipe.`, handles: [h], bbox: t.bbox });
+      out.push({ rule: this.id, severity: "warning", title: `Pipe label "${t.text}" is not next to a pipe`, message: `No pipe on layer ${ctx.cfg.sewer!.pipe.layer} within ${ctx.cfg.sewer!.pipe.labelRadius} ${ctx.sheet.units.used} of the label.`, fix: [{ text: "Move it next to its pipe, put the pipe on the pipe layer, or ERASE the label if the pipe is gone." }], handles: [h], bbox: t.bbox });
     }
     return out;
   },
@@ -491,12 +507,14 @@ const connectivity: Rule = {
           out.push({
             rule: this.id,
             severity: "warning",
-            message: `Pipe ${p.id ?? e.h} ${which} is not at a manhole (no symbol within ${ctx.cfg.sewer!.snapTolerance} ${ctx.sheet.units.used}).`,
+            title: `Pipe ${p.id ?? e.h} ${which === "start" ? "starts" : "ends"} short of a manhole`,
+            message: `No manhole symbol within ${ctx.cfg.sewer!.snapTolerance} ${ctx.sheet.units.used} (snapTolerance) of the pipe's ${which}.`,
+            fix: [{ text: "Grip-edit the pipe end and snap it to the manhole centre (CEN osnap); add the manhole if it is missing." }],
             handles: [p.h],
             bbox: around(at, 4),
           });
       if (p.start !== null && p.start === p.end)
-        out.push({ rule: this.id, severity: "warning", message: `Pipe ${p.id ?? e.h} starts and ends at the same manhole.`, handles: [p.h], bbox: e.bbox });
+        out.push({ rule: this.id, severity: "warning", title: `Pipe ${p.id ?? e.h} starts and ends at the same manhole`, message: "Both ends snap to one manhole, so it has no length in the network.", fix: [{ text: "Snap the far end to the correct downstream manhole." }], handles: [p.h], bbox: e.bbox });
     }
     // symbols stacked at one point share whatever connects there
     const tol = ctx.cfg.sewer!.snapTolerance;
@@ -506,7 +524,7 @@ const connectivity: Rule = {
       });
     n.manholes.forEach((m, i) => {
       if (!touched.has(i))
-        out.push({ rule: this.id, severity: "warning", message: `${m.outfall ? "Outfall" : m.id ? "MH " + m.id : "Manhole"} has no pipe connected.`, handles: [m.h], bbox: around(m.at) });
+        out.push({ rule: this.id, severity: "warning", title: `${m.outfall ? "Outfall" : m.id ? "MH " + m.id : "Manhole"} has no pipe connected`, message: `No pipe end within ${tol} ${ctx.sheet.units.used} of its centre.`, fix: [{ text: "Snap the pipes that should meet here to its centre, or ERASE the manhole if it is not used." }], handles: [m.h], bbox: around(m.at) });
     });
     // components
     const parent = n.manholes.map((_, i) => i);
@@ -526,6 +544,8 @@ const connectivity: Rule = {
       out.push({
         rule: this.id,
         severity: "info",
+        title: `The network is in ${comps.size} separate parts but has ${outfalls} outfall${outfalls === 1 ? "" : "s"}`,
+        fix: [{ text: "Parts without an outfall usually mean a pipe stops short; work through the connectivity warnings first." }],
         message: `Network splits into ${comps.size} connected parts (sizes ${sizes.slice(0, 8).join(", ")}${sizes.length > 8 ? ", …" : ""}) for ${outfalls} outfall${outfalls === 1 ? "" : "s"}.`,
         handles: [],
         data: { parts: comps.size, sizes },
@@ -557,18 +577,22 @@ const hydraulics: Rule = {
         out.push({
           rule: this.id,
           severity: "error",
+          title: `${name}: flow arrow points uphill`,
+          fix: [{ text: "If the arrow is wrong, MIRROR or ROTATE it 180°; if the arrow is right, the invert levels need correcting." }],
           message: `${name}: flow arrow points uphill, IL ${f2(up.il)} → ${f2(dn.il)} (rise ${f2(-fall)} m over ${p.len.toFixed(1)} m).`,
           handles: [p.h, up.h, dn.h],
           bbox: e.bbox ? padBbox(e.bbox, 0.15) : undefined,
           data: { fall, slope },
         });
       else if (fall === 0)
-        out.push({ rule: this.id, severity: "warning", message: `${name}: flat, both inverts ${f2(up.il)}.`, handles: [p.h, up.h, dn.h], bbox: e.bbox });
+        out.push({ rule: this.id, severity: "warning", title: `${name} is laid flat`, message: `Both inverts are ${f2(up.il)}.`, fix: [{ text: "Check the inverts against the design output." }], handles: [p.h, up.h, dn.h], bbox: e.bbox });
       else if (c.minSlope !== undefined && slope > 0 && slope < c.minSlope)
         out.push({
           rule: this.id,
           severity: "warning",
-          message: `${name}: grade 1 in ${Math.round(1 / slope)} is flatter than the 1 in ${Math.round(1 / c.minSlope)} minimum.`,
+          title: `${name} is flatter than the minimum grade`,
+          message: `Grade 1 in ${Math.round(1 / slope)}; the project minimum (minSlope) is 1 in ${Math.round(1 / c.minSlope)}.`,
+          fix: [{ text: "Check the inverts against the design output; a flat grade may not self-clean." }],
           handles: [p.h, up.h, dn.h],
           bbox: e.bbox,
           data: { slope },
@@ -592,7 +616,9 @@ const hydraulics: Rule = {
       out.push({
         rule: this.id,
         severity: "warning",
-        message: `${m.id ? "MH " + m.id : "Manhole"}: ${maxIn} mm comes in, ${smallOut.map((p) => p.dia).join("/")} mm goes out.`,
+        title: `Pipe gets smaller downstream at ${m.id ? "MH " + m.id : "a manhole"}`,
+        message: `${maxIn} mm comes in, ${smallOut.map((p) => p.dia).join("/")} mm goes out.`,
+        fix: [{ text: "Check the diameters against the design output; a smaller outgoing pipe chokes the flow." }],
         handles: [m.h, ...ins.map((p) => p.h), ...smallOut.map((p) => p.h)],
         bbox: around(m.at, 10),
       });

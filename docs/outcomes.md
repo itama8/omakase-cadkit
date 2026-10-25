@@ -1,7 +1,7 @@
 # Outcomes
 
 Start here to choose work. This is the current outcome map; decisions, tests, and
-handoffs live in [devlogs](../.devlog/README.md). Updated 2026-10-25.
+handoffs live in [devlogs](../.devlog/README.md). Updated 2026-10-26.
 
 ## Now
 
@@ -11,6 +11,7 @@ handoffs live in [devlogs](../.devlog/README.md). Updated 2026-10-25.
 | O2 | Someone outside the project can understand, reuse, and contribute to a public repository. | done (Linux x64 CI) | MIT license and dependency notices exist; contributor and agent entry points work; a clean-checkout CI run and public repository metadata are confirmed. | Public repository is live with a green, annotation-free CI run and a scrubbed history; contamination checks on a fresh clone found no client name. Start O3. [Evidence](../.devlog/2026-10-25-s03.md). |
 | O3 | Another application can use a small documented library API without depending on the CLI or viewer. | done (Linux x64, source checkout) | A separate consumer opens a fixture, inspects entities, lints, renders SVG, and closes the sidecar through documented exports and types; errors and process ownership are explicit. | `Cadkit`/`DrawingHandle` are the public entry, and `examples/library-consumer` proves them in CI. Start O4. [Evidence](../.devlog/2026-10-25-s04.md). |
 | O8 | A reviewer can correct drawing units from the GUI without editing JSON. | done (Linux x64, source viewer) | A compact SVG properties panel saves a folder profile, preserves other settings, and refreshes effective units, sheet facts and lint; persistence and Auto reset verified on a disposable fixture. | Refresh the viewer and use the sliders icon or unit badge. Check the chosen units against the working drawing; no private drawing profile was changed. [Evidence](../.devlog/2026-10-25-s10.md). |
+| O10 | An engineer or drafter reading a finding knows what is wrong, how to fix it in AutoCAD, and can tune the checks for their project. | partial (Linux x64, source viewer) | Every finding has a plain headline, numeric evidence and AutoCAD fix steps in viewer and CLI; guessed scales and non-plotting layers stop raising false errors; rules can be switched off, re-graded and findings accepted from the profile and the GUI. | Headlines, fix steps, AutoCAD selection copy and the scale/plot fixes are in ([s02](../.devlog/2026-10-26-s02.md)). Next: rearrange the viewer chrome (toolbar into header, badges into status bar; see the s02 handoff), then per-rule on/off and severity, accepted findings, and paper in the Properties panel. |
 | O9 | A new user runs Setup once and then launches without managing dependencies. | partial (Linux x64 verified) | Missing Node, .NET and uv are downloaded locally, setup passes, and an empty viewer plus sample drawing work through Launch on each supported OS. | Linux fresh-download and repeat-launch checks pass, including a folder with spaces and tools absent from PATH. Run the configured Windows/macOS bootstrap CI jobs before claiming those platforms. [Evidence](../.devlog/2026-10-25-s13.md). |
 
 ## Next
@@ -46,4 +47,4 @@ Borrowed from Omakase: read current state before deeper history, separate accept
 from implementation, choose a runnable next action, and keep evidence in devlogs.
 This repository has no dependency on Omakase's skills, plans, or tooling.
 
-Latest evidence: [2026-10-25-s08](../.devlog/2026-10-25-s08.md).
+Latest evidence: [2026-10-26-s02](../.devlog/2026-10-26-s02.md).

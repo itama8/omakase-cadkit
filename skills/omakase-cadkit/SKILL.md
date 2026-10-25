@@ -18,7 +18,8 @@ The first open of a DWG takes a few seconds; later calls hit the cache.
    the sheet frame, the declared and measured scale, the drawing number, the layers and the
    blocks. Read this before anything else.
 2. `omakase-cadkit lint <file>` for the review. Exit 1 means at least one error. Each finding
-   names a rule, a message and the entity handles involved.
+   has a rule, a plain-language `title`, a `message` with the numbers that disagree, `fix`
+   steps (AutoCAD command plus what it does) and the entity handles involved.
 3. `omakase-cadkit query <file> --handle H1,H2` to read the entities behind a finding, or
    `--layer L --type TEXT --text REGEX --near x,y,r` to look around it.
 4. `omakase-cadkit render <file> --finding N --out /tmp/f.png` only when you need to see a
@@ -48,8 +49,11 @@ number pattern, and the sewer conventions (manhole block names, label regexes, l
 - `units-declared`: the header units are wrong. Common in civil files drawn in UTM metres
   with `$INSUNITS = Inches`. Anything that trusts the header scales the drawing by 0.0254.
 - `scale-mismatch`: the title block's scale disagrees with frame size on the profile's paper.
-  The message says by how much. `≈` means the fit is not a standard scale.
-- `text-height-paper`: text that prints smaller than `minTextMm`. Grouped by layer.
+  The message says by how much. `≈` means the fit is not a standard scale. Without a
+  profile paper, a frame that fits a standard sheet at its declared scale takes that sheet.
+- `text-height-paper`: text that prints smaller than `minTextMm`. Grouped by layer. Layers
+  that are off, frozen, no-plot or Defpoints are skipped; a scale resting on a guessed
+  paper size gives warnings, not errors.
 - `duplicate-entities`: stacked identical copies. Data lists every stacked set.
 - `sewer-*`: the network rebuilt from symbols and label clusters. Matching is verified on a
   real 589-pipe network against its hydraulic model; still, before you report a sewer

@@ -1,4 +1,4 @@
-// Drawing payload written by the sidecar (schema 5). See sidecar/Program.cs.
+// Drawing payload written by the sidecar (schema 6). See sidecar/Program.cs.
 
 export type Bbox = [number, number, number, number]; // minX, minY, maxX, maxY (world)
 
@@ -8,6 +8,8 @@ export interface Layer {
   on: boolean;
   frozen: boolean;
   locked: boolean;
+  /** False for no-plot layers and Defpoints. */
+  plot: boolean;
   lineType: string;
   entities: number;
 }
@@ -102,7 +104,7 @@ export interface Raster {
 }
 
 export interface Drawing {
-  schema: 5;
+  schema: 6;
   source: { path: string; format: string; bytes: number };
   acadVersion: string;
   header: { insUnits: string; insUnitsCode: number; extMin: [number, number]; extMax: [number, number]; ltScale: number };
@@ -121,10 +123,21 @@ export interface Drawing {
 
 export type Severity = "error" | "warning" | "info";
 
+/** One step of a fix: a CAD command (AutoCAD names) and what doing it achieves. */
+export interface FixStep {
+  command?: string;
+  text: string;
+}
+
 export interface Finding {
   rule: string;
   severity: Severity;
+  /** Plain-language headline: what is wrong and where. */
+  title?: string;
+  /** Evidence: the numbers that disagree. */
   message: string;
+  /** How to fix it, in order. */
+  fix?: FixStep[];
   /** Entity handles the finding is about, most relevant first. */
   handles: string[];
   /** World-space area to show. */

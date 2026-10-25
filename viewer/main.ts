@@ -611,6 +611,9 @@ function updateFindingNav() {
   $<HTMLButtonElement>("#fnav-next").disabled = activeIdx >= visibleFindings.length - 1;
 }
 
+const SEV_NAME: Record<Severity, string> = { error: "Error", warning: "Warning", info: "Info" };
+const sevDot = (sev: Severity) => `<span class="dot ${sev}" role="img" title="${SEV_NAME[sev]}" aria-label="${SEV_NAME[sev]}"></span>`;
+
 function renderFindings() {
   if (!lint) return;
   visibleFindings = lint.findings.filter((f) => sevOn[f.severity]);
@@ -623,13 +626,28 @@ function renderFindings() {
     visibleFindings
       .map((f, i) => {
         const n = String(numbers.get(f) ?? i + 1).padStart(2, "0");
+        const count = f.handles.length;
+        const ents = `${count.toLocaleString()} ${count === 1 ? "entity" : "entities"}`;
+        const copyButtons = count
+          ? `<span class="fix-copy">` +
+            `<button class="icon-btn" data-act="copy-sel" title="Copy AutoCAD selection: paste at the AutoCAD command line to select ${count > SELECTION_LIMIT ? `the first ${SELECTION_LIMIT.toLocaleString()} of ` : ""}these ${ents} (needs AutoLISP: full AutoCAD, or LT 2024 and later)" aria-label="Copy AutoCAD selection"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-select" /></svg></button>` +
+            `<button class="icon-btn" data-act="copy-hs" title="Copy handles: the IDs of these ${ents}, space-separated" aria-label="Copy handles"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-copy" /></svg></button>` +
+            `</span>`
+          : "";
+        const fix = f.fix?.length
+          ? `<div class="finding-fix"><div class="fix-head"><span class="sub">How to fix</span>${copyButtons}</div><ol>${f.fix
+              .map((s) => `<li>${s.command ? `<code class="cmd">${esc(s.command)}</code>` : ""}<span>${esc(s.text)}</span></li>`)
+              .join("")}</ol></div>`
+          : "";
         return (
-          `<li data-i="${i}" class="finding sev-${f.severity}" title="${esc(title.get(f.rule)?.why ?? "")}">` +
+          `<li data-i="${i}" class="finding sev-${f.severity}">` +
           `<span class="finding-num">${n}</span>` +
           `<div class="finding-main"><div class="finding-top">` +
-          `<span class="sev-word ${f.severity}">${f.severity}</span><span class="rule">${esc(f.rule)}</span>` +
-          (f.handles.length > 1 ? `<span class="finding-meta">${f.handles.length} entities</span>` : "") +
-          `</div><p class="finding-msg">${esc(f.message)}</p></div></li>`
+          `${sevDot(f.severity)}<span class="rule" title="${esc(title.get(f.rule)?.why ?? "")}">${esc(f.rule)}</span>` +
+          (f.handles.length > 1 ? `<span class="finding-meta">${f.handles.length.toLocaleString()} entities</span>` : "") +
+          `</div>` +
+          (f.title ? `<p class="finding-title">${esc(f.title)}</p>` : "") +
+          `<p class="finding-msg">${esc(f.message)}</p>${fix}</div></li>`
         );
       })
       .join("") +
@@ -638,8 +656,37 @@ function renderFindings() {
   updateFindingNav();
   view.request();
 }
+/** AutoLISP that makes these handles the current selection, for pasting at the AutoCAD command line. */
+const SELECTION_LIMIT = 2000;
+function autocadSelection(handles: string[]): string {
+  const hs = handles.slice(0, SELECTION_LIMIT).map((h) => `"${h}"`).join(" ");
+  return `(progn (setq ck:ss (ssadd)) (foreach h '(${hs}) (if (handent h) (ssadd (handent h) ck:ss))) (sssetfirst nil ck:ss) (princ))`;
+}
+/** Copies text and keeps a popup showing exactly what is on the clipboard until it is closed. */
+function copyText(what: string, text: string, note = "") {
+  const show = (ok: boolean) => {
+    $("#clipboard-title").textContent = ok ? `Copied ${what}` : `Could not copy ${what}`;
+    $("#clipboard-note").textContent = ok ? note : "select the text below and copy it";
+    $("#clipboard-text").textContent = text;
+    $("#clipboard-pop").classList.toggle("failed", !ok);
+    $("#clipboard-pop").classList.remove("hidden");
+  };
+  (navigator.clipboard?.writeText(text) ?? Promise.reject()).then(() => show(true), () => show(false));
+}
+$("#clipboard-close").addEventListener("click", () => $("#clipboard-pop").classList.add("hidden"));
 $("#findings").addEventListener("click", (e) => {
-  const li = (e.target as HTMLElement).closest("li");
+  const b = (e.target as HTMLElement).closest("button") as HTMLButtonElement | null;
+  if (b) {
+    const li = b.closest("li.finding") as HTMLElement | null;
+    const f = li?.dataset.i ? visibleFindings[Number(li.dataset.i)] : undefined;
+    if (!f) return;
+    const n = f.handles.length;
+    if (b.dataset.act === "copy-sel")
+      copyText("AutoCAD selection", autocadSelection(f.handles), n > SELECTION_LIMIT ? `first ${SELECTION_LIMIT.toLocaleString()} of ${n.toLocaleString()} entities · paste at the command line` : `${n.toLocaleString()} ${n === 1 ? "entity" : "entities"} · paste at the command line`);
+    if (b.dataset.act === "copy-hs") copyText("handles", f.handles.join(" "), `${n.toLocaleString()} ${n === 1 ? "handle" : "handles"}`);
+    return;
+  }
+  const li = (e.target as HTMLElement).closest("li.finding") as HTMLElement | null;
   if (!li?.dataset.i) return;
   focusFinding(Number(li.dataset.i), { zoom: !(e as MouseEvent).shiftKey });
 });
@@ -762,7 +809,7 @@ function inspect(i: number) {
     `<table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join("")}</table>` +
     (related.length
       ? `<div class="sub">Findings on this entity</div><ol class="list findings">${related
-          .map((f) => `<li class="finding sev-${f.severity}"><span class="finding-num">${String(lint!.findings.indexOf(f) + 1).padStart(2, "0")}</span><div class="finding-main"><div class="finding-top"><span class="sev-word ${f.severity}">${f.severity}</span><span class="rule">${esc(f.rule)}</span></div><p class="finding-msg">${esc(f.message)}</p></div></li>`)
+          .map((f) => `<li class="finding sev-${f.severity}"><span class="finding-num">${String(lint!.findings.indexOf(f) + 1).padStart(2, "0")}</span><div class="finding-main"><div class="finding-top">${sevDot(f.severity)}<span class="rule">${esc(f.rule)}</span></div><p class="finding-msg">${esc(f.title ?? f.message)}</p></div></li>`)
           .join("")}</ol>`
       : "");
   ($("#inspect") as any)._ent = i;
@@ -776,8 +823,8 @@ $("#inspect").addEventListener("click", (ev) => {
   const i = ($("#inspect") as any)._ent as number | undefined;
   if (!b || i === undefined || !drawing) return;
   const e = drawing.entities[i];
-  if (b.dataset.act === "copy-h") navigator.clipboard.writeText(e.h);
-  if (b.dataset.act === "copy-link") navigator.clipboard.writeText(location.href);
+  if (b.dataset.act === "copy-h") copyText("handle", e.h, e.type);
+  if (b.dataset.act === "copy-link") copyText("link", location.href, "opens this entity while the viewer server runs");
   if (b.dataset.act === "zoom") select([i], true);
 });
 
