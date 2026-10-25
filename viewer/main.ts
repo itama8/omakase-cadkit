@@ -30,6 +30,7 @@ function applyTheme(name: "dark" | "light") {
   document.documentElement.dataset.theme = name;
   view.theme = (name === "light" ? LIGHT : DARK) as Theme;
   $("#theme-toggle").setAttribute("aria-pressed", String(name === "light"));
+  $("#theme-toggle").title = name === "light" ? "Switch to the graphite theme" : "Switch to the paper theme";
   view.request();
 }
 const savedTheme = localStorage.getItem(THEME_KEY);
@@ -44,6 +45,85 @@ const help = $<HTMLDialogElement>("#help-dialog");
 $("#help-button").addEventListener("click", () => help.showModal());
 $("#help-close").addEventListener("click", () => help.close());
 help.addEventListener("click", (e) => { if (e.target === help) help.close(); });
+
+// ------------------------------------------------------------------ tooltips
+
+// Titles show as themed tips: quicker than the browser's, with any shortcut as a key cap. On
+// first hover a title moves to data-tip so the native tooltip does not show as well; code may
+// set .title again later and the next hover picks it up. The tip is a popover so it also shows
+// above modal dialogs.
+const tip = document.createElement("div");
+tip.id = "tip";
+tip.popover = "manual";
+tip.setAttribute("role", "tooltip");
+document.body.append(tip);
+let tipFor: HTMLElement | null = null;
+let tipPending: HTMLElement | null = null;
+let tipTimer = 0;
+let tipWarmUntil = 0; // moving between controls right after a tip shows the next one at once
+let keyboardNav = false;
+function tipTarget(el: EventTarget | null): HTMLElement | null {
+  const t = el instanceof Element ? el.closest<HTMLElement>("[title], [data-tip]") : null;
+  if (!t) return null;
+  if (t.hasAttribute("title")) {
+    const text = t.title;
+    t.removeAttribute("title");
+    t.dataset.tip = text;
+    // keep what the title gave assistive technology
+    if (!t.hasAttribute("aria-label") && !t.textContent!.trim()) t.setAttribute("aria-label", text);
+    else if (t.getAttribute("aria-label") !== text) t.setAttribute("aria-description", text);
+  }
+  return t.dataset.tip ? t : null;
+}
+function showTip(t: HTMLElement) {
+  if (!t.isConnected) return;
+  tipFor = t;
+  const text = t.dataset.tip!;
+  const key = text.match(/^([\s\S]*?) \(((?:Alt|Shift|Ctrl) \+ [^()]+|[A-Z/?]|Esc)\)$/);
+  tip.innerHTML = key ? `${esc(key[1])}<kbd>${esc(key[2])}</kbd>` : esc(text);
+  tip.showPopover();
+  const r = t.getBoundingClientRect();
+  const w = tip.offsetWidth, h = tip.offsetHeight, gap = 8;
+  const side = t.closest<HTMLElement>("[data-tip-side]")?.dataset.tipSide;
+  let x: number, y: number;
+  if (side === "left" || side === "right") {
+    x = side === "left" ? r.left - w - gap : r.right + gap;
+    y = r.top + r.height / 2 - h / 2;
+  } else {
+    x = r.left + r.width / 2 - w / 2;
+    // below, except for controls low on the screen (corner tools, status bar)
+    y = r.top > innerHeight * 0.6 || r.bottom + gap + h > innerHeight - 4 ? r.top - gap - h : r.bottom + gap;
+  }
+  tip.style.left = `${Math.round(Math.max(4, Math.min(innerWidth - w - 4, x)))}px`;
+  tip.style.top = `${Math.round(Math.max(4, Math.min(innerHeight - h - 4, y)))}px`;
+}
+function hideTip() {
+  clearTimeout(tipTimer);
+  tipPending = null;
+  if (!tipFor) return;
+  tipFor = null;
+  tipWarmUntil = performance.now() + 400;
+  tip.hidePopover();
+}
+document.addEventListener("pointerover", (e) => {
+  if (e.pointerType === "touch" || document.body.classList.contains("resizing")) return;
+  const t = tipTarget(e.target);
+  if (t && (t === tipFor || t === tipPending)) return;
+  hideTip();
+  if (!t) return;
+  tipPending = t;
+  tipTimer = window.setTimeout(() => showTip(t), performance.now() < tipWarmUntil ? 0 : 450);
+});
+document.addEventListener("pointerout", (e) => { if (!e.relatedTarget) hideTip(); });
+document.addEventListener("pointerdown", () => { keyboardNav = false; hideTip(); }, true);
+document.addEventListener("keydown", () => { keyboardNav = true; hideTip(); }, true);
+document.addEventListener("wheel", hideTip, { capture: true, passive: true });
+document.addEventListener("scroll", hideTip, true);
+document.addEventListener("focusin", (e) => {
+  const t = keyboardNav ? tipTarget(e.target) : null;
+  if (t) showTip(t);
+});
+document.addEventListener("focusout", hideTip);
 
 let file: string | null = null;
 let drawing: Drawing | null = null;
@@ -197,25 +277,6 @@ function restoreViewSettings() {
   setBackgroundImage(saved?.background ?? true, false);
 }
 
-// ------------------------------------------------------------------ tabs
-
-for (const nav of document.querySelectorAll<HTMLElement>(".tabs")) {
-  nav.addEventListener("click", (e) => {
-    const b = (e.target as HTMLElement).closest("button");
-    if (!b) return;
-    showTab(nav, b.dataset.tab!);
-  });
-}
-function showTab(nav: HTMLElement | string, tab: string) {
-  const n = typeof nav === "string" ? document.querySelector<HTMLElement>(`.tabs[data-for="${nav}"]`)! : nav;
-  const side = n.parentElement!;
-  const id = side.id;
-  document.body.classList.remove(`${id}-hidden`);
-  $(`#toggle-${id}`).setAttribute("aria-expanded", "true");
-  n.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x.dataset.tab === tab));
-  side.querySelectorAll<HTMLElement>(".pane").forEach((p) => p.classList.toggle("on", p.dataset.pane === tab));
-}
-
 // ------------------------------------------------------------------ resizable panels
 
 // Drag a panel edge or the Browse/Recent divider; double-click resets. Sizes are a layout
@@ -288,6 +349,76 @@ for (const handle of document.querySelectorAll<HTMLElement>(".resizer")) {
   });
 }
 
+// ------------------------------------------------------------------ tabs
+
+type Side = "left" | "right";
+for (const nav of document.querySelectorAll<HTMLElement>(".tabs")) {
+  nav.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest("button");
+    if (b?.dataset.collapse) setPanel(b.dataset.collapse as Side, false);
+    else if (b?.dataset.tab) showTab(nav.dataset.for as Side, b.dataset.tab);
+  });
+}
+function showTab(side: Side, tab: string) {
+  setPanel(side, true);
+  for (const b of document.querySelectorAll<HTMLElement>(`.tabs[data-for="${side}"] button, #ribbon-${side} button`))
+    b.classList.toggle("on", b.dataset.tab === tab);
+  $(`#${side}`).querySelectorAll<HTMLElement>(".pane").forEach((p) => p.classList.toggle("on", p.dataset.pane === tab));
+}
+// A closed panel leaves a ribbon of its tabs on the window edge; the open panel keeps its
+// width and tab, and its collapse button stands where the ribbon was.
+function setPanel(side: Side, open: boolean) {
+  document.body.classList.toggle(`${side}-hidden`, !open);
+}
+
+// ------------------------------------------------------------------ edge ribbons
+
+// Drag a ribbon along its edge; a press that does not move opens the tab under it. The
+// position is a 0-1 fraction of the stage height so it survives window resizes.
+for (const ribbon of document.querySelectorAll<HTMLElement>(".ribbon")) {
+  const side = ribbon.dataset.side as Side;
+  const key = `ribbon-${side}`;
+  const place = (pos: number) => ribbon.style.setProperty("--pos", String(pos));
+  place(layoutSizes[key] ?? 0.3);
+  let start: { y: number; pos: number; range: number; pointerId: number; moved: boolean } | null = null;
+  let dragged = false;
+  ribbon.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    dragged = false;
+    const range = $("#stage").clientHeight - 28 - ribbon.offsetHeight;
+    start = { y: e.clientY, pos: Number(ribbon.style.getPropertyValue("--pos")), range, pointerId: e.pointerId, moved: false };
+  });
+  ribbon.addEventListener("pointermove", (e) => {
+    if (!start || e.pointerId !== start.pointerId) return;
+    const dy = e.clientY - start.y;
+    if (!start.moved && Math.abs(dy) < 4) return;
+    if (!start.moved) {
+      start.moved = true;
+      ribbon.setPointerCapture(e.pointerId);
+      ribbon.classList.add("dragging");
+      document.body.classList.add("resizing", "row-resize");
+    }
+    layoutSizes[key] = start.range > 0 ? Math.max(0, Math.min(1, start.pos + dy / start.range)) : 0;
+    place(layoutSizes[key]);
+  });
+  const end = () => {
+    if (start?.moved) {
+      dragged = true; // the click that ends a drag does not open a tab
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify(layoutSizes));
+    }
+    start = null;
+    ribbon.classList.remove("dragging");
+    document.body.classList.remove("resizing", "row-resize");
+  };
+  ribbon.addEventListener("pointerup", end);
+  ribbon.addEventListener("pointercancel", end);
+  ribbon.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest("button");
+    if (b?.dataset.tab && !dragged) showTab(side, b.dataset.tab);
+    dragged = false;
+  });
+}
+
 // ------------------------------------------------------------------ status
 
 function overlay(msg: string | null, kind: "" | "error" = "") {
@@ -343,7 +474,7 @@ async function open(path: string, opts: { hash?: string } = {}) {
     renderLayers();
     renderMeta();
     overlay(null);
-    $("#perf").title = `server ${serverMs} ms (${cached ? "cached" : "converted"}), total ${(performance.now() - t0).toFixed(0)} ms`;
+    $("#perf").title = `Entities in the drawing and labels drawn at this zoom\nOpened in ${(performance.now() - t0).toFixed(0)} ms (server ${serverMs} ms, ${cached ? "cached" : "converted"})`;
     document.title = `${path.split("/").pop()} — omakase-cadkit`;
     const revision = view.viewRevision;
     await runLint(revision);
@@ -418,9 +549,8 @@ function renderMeta() {
     ? `<span class="chip alert" title="Errors and warnings in this drawing"><strong>${errors}</strong> err <strong>${warnings}</strong> warn</span>`
     : `<span class="chip" title="No errors or warnings"><strong>clean</strong></span>`;
   $("#meta").innerHTML =
-    `<span class="chip">${esc(d.acadVersion)} ${esc(d.source.format.toUpperCase())}</span>` +
-    `<span class="chip">${d.entities.length.toLocaleString()} entities</span>` +
-    `<button class="chip meta-units" title="Drawing properties · file header: ${esc(d.header.insUnits)}" aria-label="Edit drawing units">units ${esc(lint?.sheet?.units.used ?? d.header.insUnits)}</button>` +
+    `<span class="chip" title="AutoCAD file version and format">${esc(d.acadVersion)} ${esc(d.source.format.toUpperCase())}</span>` +
+    `<button class="chip meta-units" title="Units used to read sizes (file header: ${esc(d.header.insUnits)}). Click to change them." aria-label="Edit drawing units">units ${esc(lint?.sheet?.units.used ?? d.header.insUnits)}</button>` +
     issue;
 }
 
@@ -449,7 +579,7 @@ function renderLayers() {
   $("#layers").innerHTML = background + rows
     .map(
       ({ l, i }) =>
-        `<li data-i="${i}" class="layer ${view.hiddenLayers.has(i) ? "off" : ""}" title="${esc(l.name)}${!l.on ? " (off in file)" : ""}${l.frozen ? " (frozen in file)" : ""}. Alt-click to show only this layer.">` +
+        `<li data-i="${i}" class="layer ${view.hiddenLayers.has(i) ? "off" : ""}" title="${esc(l.name)}${!l.on ? " (off in file)" : ""}${l.frozen ? " (frozen in file)" : ""}\nClick to show or hide; Alt-click to show only this layer">` +
         `<span class="swatch" style="background:${hexOf(l.color)}"></span><span class="name">${esc(l.name)}</span><span class="count">${l.entities}</span></li>`,
     )
     .join("");
@@ -516,7 +646,7 @@ function runSearch() {
   $("#search-count").textContent = `${hits.length} match${hits.length === 1 ? "" : "es"}${hits.length > 500 ? " (first 500 listed)" : ""}`;
   list.innerHTML = hits
     .slice(0, 500)
-    .map((i) => `<li data-i="${i}" title="${esc(drawing!.entities[i].h)}"><span class="search-text">${esc(drawing!.entities[i].text!.slice(0, 80))}</span><span class="tag">${esc(drawing!.layers[drawing!.entities[i].layer]?.name ?? "")}</span></li>`)
+    .map((i) => `<li data-i="${i}" title="Zoom to this text (handle ${esc(drawing!.entities[i].h)})"><span class="search-text">${esc(drawing!.entities[i].text!.slice(0, 80))}</span><span class="tag">${esc(drawing!.layers[drawing!.entities[i].layer]?.name ?? "")}</span></li>`)
     .join("");
 }
 $("#search-results").addEventListener("click", (e) => {
@@ -529,7 +659,7 @@ $("#search-results").addEventListener("click", (e) => {
 
 async function loadRecent() {
   const r: string[] = await fetch("/api/recent").then((r) => r.json());
-  $("#recent").innerHTML = r.map((p) => `<li data-p="${esc(p)}" title="${esc(p)}"><span class="name">${esc(p.split("/").pop()!)}</span></li>`).join("") || `<li class="hint">No drawings opened yet.</li>`;
+  $("#recent").innerHTML = r.map((p) => `<li data-p="${esc(p)}" title="Open ${esc(p)}"><span class="name">${esc(p.split("/").pop()!)}</span></li>`).join("") || `<li class="hint">No drawings opened yet.</li>`;
 }
 async function browse(dir?: string) {
   const r = await fetch(`/api/files${dir ? "?dir=" + encodeURIComponent(dir) : ""}`).then((r) => r.json());
@@ -542,8 +672,8 @@ async function browse(dir?: string) {
   field.title = r.dir;
   field.scrollLeft = field.scrollWidth; // keep the folder name, not the root, in view
   $("#dir").innerHTML =
-    `<li class="dir" data-d="${esc(r.parent)}"><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron-left" /></svg><span class="name">..</span></li>` +
-    r.entries.map((e: any) => (e.dir ? `<li class="dir" data-d="${esc(e.path)}"><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder" /></svg><span class="name">${esc(e.name)}</span></li>` : `<li data-p="${esc(e.path)}"><span class="name">${esc(e.name)}</span><span class="size">${(e.size / 1e6).toFixed(1)} MB</span></li>`)).join("");
+    `<li class="dir" data-d="${esc(r.parent)}" title="Up to ${esc(r.parent)}"><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron-left" /></svg><span class="name">..</span></li>` +
+    r.entries.map((e: any) => (e.dir ? `<li class="dir" data-d="${esc(e.path)}" title="Open folder ${esc(e.path)}"><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder" /></svg><span class="name">${esc(e.name)}</span></li>` : `<li data-p="${esc(e.path)}" title="Open ${esc(e.path)}"><span class="name">${esc(e.name)}</span><span class="size">${(e.size / 1e6).toFixed(1)} MB</span></li>`)).join("");
 }
 for (const id of ["#recent", "#dir"])
   $(id).addEventListener("click", (e) => {
@@ -569,12 +699,16 @@ async function runLint(initialRevision?: number) {
     return;
   }
   packs = lint!.packs;
-  $("#packs").innerHTML = lint!.availablePacks.map((p) => `<label><input type="checkbox" data-pack="${p}" ${packs!.includes(p) ? "checked" : ""}/> ${p}</label>`).join("");
+  const packRules = (p: string) => lint!.rules.filter((r) => r.pack === p).map((r) => r.id).join(", ");
+  $("#packs").innerHTML = lint!.availablePacks.map((p) => `<label title="Rule pack ${p}; tick to include its rules in lint: ${esc(packRules(p))}"><input type="checkbox" data-pack="${p}" ${packs!.includes(p) ? "checked" : ""}/> ${p}</label>`).join("");
   $("#profile").innerHTML = lint!.profile ? `profile <code>${esc(lint!.profile)}</code>` : `no profile · built-in defaults`;
+  $("#profile").title = lint!.profile
+    ? `Project settings (units, engineering limits) read from ${lint!.profile}`
+    : "No omakase-cadkit.json found for this drawing, so checks use built-in defaults";
   for (const s of ["error", "warning", "info"] as Severity[]) $(`#n-${s}`).textContent = String(lint!.counts[s]);
   const measured = lint!.sheet.frames.find((f: any) => f.measured)?.measured;
   $("#sheet-scale").textContent = measured ? `1:${fmt(measured, 0)}` : "—";
-  $("#finding-badge").textContent = lint!.counts.error ? String(lint!.counts.error) : "";
+  $("#finding-badge").textContent = $("#ribbon-badge").textContent = lint!.counts.error ? String(lint!.counts.error) : "";
   renderMeta();
   renderFindings();
   renderSheet();
@@ -636,7 +770,7 @@ function renderFindings() {
           : "";
         const fix = f.fix?.length
           ? `<div class="finding-fix"><div class="fix-head"><span class="sub">How to fix</span>${copyButtons}</div><ol>${f.fix
-              .map((s) => `<li>${s.command ? `<code class="cmd">${esc(s.command)}</code>` : ""}<span>${esc(s.text)}</span></li>`)
+              .map((s) => `<li>${s.command ? `<code class="cmd" title="AutoCAD command: type it at the command line">${esc(s.command)}</code>` : ""}<span>${esc(s.text)}</span></li>`)
               .join("")}</ol></div>`
           : "";
         return (
@@ -744,7 +878,7 @@ function renderSheet() {
       group(
         f.paper + (f.isoRatio ? "" : " · fitted"),
         [
-          ["handle", `<a href="#" data-h="${f.handle}">${f.handle}</a>`],
+          ["handle", `<a href="#" data-h="${f.handle}" title="Select and zoom to this frame">${f.handle}</a>`],
           ["drawing number", esc(f.drawingNumber?.text ?? "—")],
           ["paper", `${f.paper}${f.isoRatio ? "" : " (frame is not an ISO ratio)"}`],
           ["measured scale", f.measured ? `1:${fmt(f.measured, 0)}` : "—"],
@@ -805,7 +939,10 @@ function inspect(i: number) {
   const related = lint?.findings.filter((f) => f.handles.includes(e.h)) ?? [];
   $("#inspect").innerHTML =
     `<h3>${esc(e.type)} <span class="handle">${esc(e.h)}</span></h3>` +
-    `<div class="actions"><button data-act="copy-h">Copy handle</button><button data-act="copy-link">Copy link</button><button data-act="zoom">Zoom to entity</button></div>` +
+    `<div class="actions">` +
+    `<button data-act="copy-h" title="Copy the handle: the entity's permanent ID in the drawing">Copy handle</button>` +
+    `<button data-act="copy-link" title="Copy a viewer link that opens this entity">Copy link</button>` +
+    `<button data-act="zoom" title="Zoom the drawing to this entity">Zoom to entity</button></div>` +
     `<table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join("")}</table>` +
     (related.length
       ? `<div class="sub">Findings on this entity</div><ol class="list findings">${related
@@ -932,17 +1069,9 @@ for (const [id, factor] of [["#zoom-in", 1.5], ["#zoom-out", 1 / 1.5]] as const)
     rememberView();
     view.zoomAt(view.width / 2, view.height / 2, factor);
   });
-for (const side of ["left", "right"] as const) {
-  const button = $(`#toggle-${side}`);
-  button.addEventListener("click", () => {
-    const hidden = document.body.classList.toggle(`${side}-hidden`);
-    button.setAttribute("aria-expanded", String(!hidden));
-  });
-}
 if (innerWidth <= 860) {
-  document.body.classList.add("left-hidden", "right-hidden");
-  $("#toggle-left").setAttribute("aria-expanded", "false");
-  $("#toggle-right").setAttribute("aria-expanded", "false");
+  setPanel("left", false);
+  setPanel("right", false);
 }
 
 window.addEventListener("keydown", (e) => {
@@ -961,8 +1090,6 @@ window.addEventListener("keydown", (e) => {
   else if (e.key === "k" || e.key === "p") focusFinding(Math.max(0, activeIdx - 1));
   else if (e.key === "/") {
     e.preventDefault();
-    document.body.classList.remove("left-hidden");
-    $("#toggle-left").setAttribute("aria-expanded", "true");
     showTab("left", "search");
     $<HTMLInputElement>("#search").focus();
   }

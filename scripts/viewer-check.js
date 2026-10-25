@@ -140,10 +140,14 @@
   } finally { v.renderRaster = renderRaster; }
 
   for (const side of ['left', 'right']) {
-    const button = document.querySelector(`#toggle-${side}`);
-    button.click();
-    assert(button.getAttribute('aria-expanded') === String(!document.body.classList.contains(`${side}-hidden`)), 'panel toggle state');
-    button.click();
+    const ribbon = document.querySelector(`#ribbon-${side}`);
+    document.querySelector(`[data-collapse="${side}"]`).click();
+    assert(document.body.classList.contains(`${side}-hidden`) && getComputedStyle(ribbon).display !== 'none', 'collapse must leave the edge ribbon');
+    const tab = ribbon.querySelector('button:not(.on)');
+    tab.click();
+    assert(!document.body.classList.contains(`${side}-hidden`) && getComputedStyle(ribbon).display === 'none', 'a ribbon tab must reopen the panel');
+    assert(document.querySelector(`#${side} [data-pane="${tab.dataset.tab}"]`).classList.contains('on'), 'a ribbon tab must open its pane');
+    document.querySelector(`#${side} .tabs button[data-tab]`).click();
   }
   if (document.querySelector('#findings li[data-i="0"]')) {
     const beforeFinding = camera();

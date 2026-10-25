@@ -77,13 +77,15 @@ through findings, `/` searches text, clicking an entity inspects it. URLs carry 
 or `#f=N`, so an agent can hand over an exact place.
 
 Drag with the left or middle button to pan; use the wheel or the +/− buttons to zoom.
-The drawing toolbar includes Fit, Back (also `Alt+Left`), and buttons to hide either side
-panel. Selecting a finding keeps the finding list open, highlights it on the drawing and
+The toolbar in the bottom-right corner has Back (also `Alt+Left`), Fit, zoom and the background
+image switch; drawing facts (version, units, errors and warnings) sit in the status bar. Collapse
+a side panel with the chevron on its outer edge: its tabs stay as a ribbon on the window edge,
+which you can drag up or down and click to reopen that tab. Selecting a finding keeps the finding list open, highlights it on the drawing and
 shows **How to fix**: AutoCAD commands with what each does, plus icon buttons for **Copy AutoCAD selection**
 (AutoLISP to paste at the command line; needs full AutoCAD or LT 2024+) and **Copy handles**.
 Every copy opens a popup showing exactly what went to the clipboard; it stays until closed.
 Enable **Show all finding markers** to see the other findings too. Re-running lint preserves your view.
-Use the sliders icon in the header (or click the unit badge) to open **Drawing properties**.
+Use the sliders icon in the header (or click the units badge in the status bar) to open **Drawing properties**.
 Choose `mm`, `cm`, `m`, `in`, `ft`, or **Auto**, then Apply. The ruler previews the unit size;
 the badge, sheet facts and findings update immediately. This saves a profile beside the drawing
 and applies to other drawings in that folder and inheriting subfolders. Existing profile settings
