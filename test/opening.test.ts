@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { copyFileSync, mkdtempSync, rmSync, statSync, utimesSync } from "node:fs";
+import { copyFileSync, mkdtempSync, realpathSync, rmSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createServer } from "node:net";
@@ -9,7 +9,8 @@ import { test } from "node:test";
 import { main } from "../src/cli.ts";
 
 test("drawing revalidation skips payload transfer, detects edits, and browses folders", { timeout: 30000 }, async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "cadkit-opening-"));
+  // macOS temp folders sit behind a /var -> /private/var link; the server reports real paths.
+  const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "cadkit-opening-")));
   const drawing = path.join(dir, "drawing.dxf");
   copyFileSync(path.resolve("fixtures/sewer_bad.dxf"), drawing);
   const child = spawn(process.execPath, ["src/server.ts", "--port", "0"], {
