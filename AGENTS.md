@@ -1,57 +1,54 @@
 # AGENTS.md
 
-omakase-cadkit views, inspects and lints DWG/DXF drawings. Read `README.md` for the shape. Using
-omakase-cadkit on drawings (not developing it) is covered by `skills/omakase-cadkit/SKILL.md`.
+omakase-cadkit views, inspects and lints DWG/DXF drawings. The [README](README.md)
+explains what it is. To *use* it on drawings rather than develop it, read
+[skills/omakase-cadkit/SKILL.md](skills/omakase-cadkit/SKILL.md).
 
-## Start and hand off
+## Before you start
 
-- Setup is documented in `docs/setup.md`: `npm ci`, then `npm run setup` from the checkout.
-  It uses synthetic drawings; private DWGs and Omakase are not required.
-- Read `docs/outcomes.md` for current state and the next useful action, then its linked
-  devlog. Keep planning outcome-based; do not expand it into detailed implementation plans.
-- Record meaningful changes, decisions, exact checks and limits in `.devlog/YYYY-MM-DD-sNN.md`
-  using `.devlog/TEMPLATE.md`. Update the outcome row when its state or next action changes.
-- `CONTRIBUTING.md` covers contribution and evidence expectations. Source checks do not
-  establish installed-package or cross-platform support. AGPL-3.0-only is selected; npm publishing
-  remains disabled until the package outcome is verified.
+- Set up with [docs/setup.md](docs/setup.md).
+- Read [docs/outcomes.md](docs/outcomes.md) and the devlog it links. Work on one
+  outcome.
+- Check `git status` and keep other people's uncommitted work.
 
-## Commands
+## Build and check
 
-- `npm run build:sidecar` after any change to `sidecar/*.cs`. Payload cache keys include
-  file path, size, mtime and the sidecar build. Restart a running server after rebuilding;
-  old JSON payloads can be removed from `~/.cache/omakase-cadkit` without deleting preferences.
-- `npm run build:viewer` after any change under `viewer/`.
-- `npm run build:lib` after any change under `src/`: `bin/` and the package entry run
-  `dist/`, not the sources. `npm run setup` and `npm run build` include it.
-- `npm run typecheck` and `npm test` before calling work done. Tests need the sidecar built
-  and `npm run fixtures` run once.
-- `npm run bundle` builds the download ZIP for the current platform (prebuilt sidecar, its
-  own Node runtime, compiled CLI, viewer). CI attaches those to a `v*` tag's release, so a
-  tester unzips and launches with no tools installed. Needs the .NET SDK and `zip`. On
-  Windows it builds `omakase-cadkit.exe` (`launcher/`, no console window) and ships only
-  the per-user installer from `installer/omakase-cadkit.iss` (Inno Setup 6; without it,
-  a local build falls back to a ZIP).
-- `node scripts/make-icon.mjs` regenerates the committed app icon in `assets/` and
-  `viewer/favicon.svg` (needs rsvg-convert and magick).
-- `node scripts/shot.mjs <viewer-url> out.png [w h] [--eval js]` screenshots the viewer
-  headless once the drawing has loaded (needs `chromium`). Use it to check viewer changes.
+| After changing | Run |
+|---|---|
+| `src/` | `npm run build:lib` |
+| `viewer/` | `npm run build:viewer` |
+| `sidecar/*.cs` | `npm run build:sidecar`, then restart the viewer server |
+| Anything | `npm run typecheck && npm test` before calling it done |
 
-## Rules for rule writers
+- Check viewer changes visually: `node scripts/shot.mjs <url> out.png --check`.
+- `npm run bundle` builds this platform's download (Windows: installer via Inno
+  Setup; others: ZIP). `node scripts/check-bundle.mjs` launches it.
+- `node scripts/make-icon.mjs` regenerates the app icon in `assets/` and
+  `viewer/favicon.svg`.
 
-- A rule earns its place by catching a real defect. Every new rule gets a planted defect in
-  `fixtures/make_fixtures.py` (bad drawing) and must stay silent on the clean drawing.
-- Before believing a rule on a real drawing, check a sample of its findings against a second
-  source (the hydraulic model, the issued PDF, the raw entities via `omakase-cadkit query`). The
-  first versions of the sewer matcher produced hundreds of false findings that looked
-  plausible; every one came from pairing labels to the wrong symbol.
-- Findings carry handles of real entities and a world bbox. Messages state the numbers that
-  disagree, not just that something is wrong.
-- Engineering limits (minimum depth, minimum slope) come from `omakase-cadkit.json`, never from
-  defaults in code.
+## Code rules
 
-## Code
+- Node runs `src/` TypeScript directly. Use erasable syntax only: no enums, parameter
+  properties or namespaces. Relative imports end in `.ts`.
+- `viewer/` uses no framework.
+- When the payload format changes, bump `schema` in `sidecar/Program.cs` and
+  `src/types.ts` together.
 
-- Node runs `src/` TypeScript directly: erasable syntax only (no enums, no parameter
-  properties, no namespaces), `.ts` extensions on relative imports.
-- `viewer/` stays framework-free so it can move into another host.
-- Payload schema changes bump `schema` in `sidecar/Program.cs` and `src/types.ts` together.
+## Lint rule rules
+
+- A rule must catch a real defect. Add a planted defect for it to
+  `fixtures/make_fixtures.py`, and keep it silent on the clean drawing.
+- Before trusting a rule on a real drawing, check some findings against a second
+  source: the hydraulic model, the issued PDF, or the raw entities via `query`.
+  Early sewer matching produced hundreds of plausible but wrong findings.
+- Every finding carries real entity handles and a world bbox. Its message gives the
+  numbers that disagree.
+- Engineering limits (minimum depth, slope) come from `omakase-cadkit.json`, never
+  from defaults in code.
+
+## Hand off
+
+Write `.devlog/YYYY-MM-DD-sNN.md` from the [template](.devlog/TEMPLATE.md): what
+changed, the exact checks and their results, and what is still unproven. Update the
+outcome row if its state or next step changed. A passing check proves only the
+environment it ran in. npm publishing stays off until the package outcome is done.

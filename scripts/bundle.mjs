@@ -102,9 +102,10 @@ writeFileSync(path.join(stage, "START-HERE.txt"), win ? `omakase-cadkit ${pkg.ve
 4. Uninstall from Settings > Apps > Installed apps.
 
 The installer is unsigned: if Windows says "Windows protected your PC", choose More info,
-then Run anyway. What is not drawn yet: paper-space layouts, OLE table contents, hatch
-textures, linetypes. Report problems at https://github.com/itama8/omakase-cadkit/issues
-with your Windows version and what you did. Keep private drawings local.
+then Run anyway. Not drawn yet: paper-space layouts, REGION and 3D solids; dense hatches,
+complex linetypes and SHX fonts are approximated. Report problems at
+https://github.com/itama8/omakase-cadkit/issues with your Windows version and what you did.
+Keep private drawings local.
 ` : `omakase-cadkit ${pkg.version} — alpha
 
 1. Keep this folder where you unzipped it. It contains everything the app needs.
@@ -118,9 +119,10 @@ with your Windows version and what you did. Keep private drawings local.
    bash launch.command view "/path/to/drawing.dwg"
 4. Sample drawings are in fixtures/. Try bash launch.command lint fixtures/sewer_bad.dxf
 
-What is not drawn yet: paper-space layouts, OLE table contents, hatch textures,
-linetypes. Report problems at https://github.com/itama8/omakase-cadkit/issues with
-your OS, the commands you ran and the exit code. Keep private drawings local.
+Not drawn yet: paper-space layouts, REGION and 3D solids; dense hatches, complex
+linetypes and SHX fonts are approximated. Report problems at
+https://github.com/itama8/omakase-cadkit/issues with your OS, what you did and what
+happened. Keep private drawings local.
 `);
 
 const mb = (file) => `${(statSync(file).size / 1e6).toFixed(0)} MB`;

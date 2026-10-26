@@ -1,40 +1,18 @@
 # Contributing
 
-Start with [README.md](README.md) and [source setup](docs/setup.md). No private
-drawings or Omakase installation are needed. People and agents use the same commands.
+1. **Set up** with [developer setup](docs/setup.md). You need no private drawings.
+2. **Pick one outcome** from [outcomes](docs/outcomes.md) and read its latest devlog.
+3. **Make the change.** Follow [AGENTS.md](AGENTS.md); its rules apply to people too.
+4. **Check it.** Run `npm run typecheck && npm test`. For viewer changes, also run
+   `scripts/shot.mjs --check` and look at the screenshot.
+5. **Hand off.** For anything bigger than a small fix, write a devlog (see
+   [.devlog/README.md](.devlog/README.md)) and update the outcome row if its state
+   changed.
 
-## Choose work
+In a pull request, say what problem it solves, what changed, how you checked it, and
+what is still unproven.
 
-Read [outcomes](docs/outcomes.md), then its linked devlog. Keep a change focused on
-one useful result and state how it will be verified. Next and Later outcomes are
-direction, not a request to implement everything. Discuss changes to public API,
-runtime requirements, and distribution before treating them as settled contracts.
-
-The project is licensed under AGPL-3.0-only; see [LICENSE](LICENSE). Contributions are made under
-that license. Preserve dependency attribution in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-## Make and verify a change
-
-- Preserve unrelated work in a shared checkout. Inspect Git status and branch first.
-- Follow [AGENTS.md](AGENTS.md) for code and lint-rule contracts.
-- Run `npm run typecheck` and `npm test` before handing back a change.
-- Rebuild the sidecar after C# changes, and invalidate the payload cache when output
-  changes. Rebuild the viewer after viewer changes.
-- For viewer behavior, use `scripts/shot.mjs --check` and inspect the relevant
-  interaction. A typecheck alone does not prove navigation or layout.
-- New rules need planted defects and must stay silent on clean drawings. Check
-  real findings against raw entities or another authorized source.
-- Use synthetic or redistributable drawings in public fixtures and reports. Keep
-  private drawings, exported client content, and personal paths out of commits.
-
-## Leave a useful handoff
-
-Use [the compact devlog format](.devlog/README.md) for meaningful behavior,
-architecture, setup, or outcome changes. Record the actual checks, decisions,
-acceptance limits, and one next action. Tiny typo fixes do not need a devlog.
-Update the outcome row when current state or the next action changes.
-
-A contribution description should explain the concrete problem, resulting
-behavior, verification, and remaining gaps. Link the relevant outcome and devlog.
-Do not equate a source-checkout test with a successful package installation, or
-an automated fixture check with manual acceptance on an issued drawing.
+Keep private drawings, client names and personal paths out of commits, fixtures and
+reports. Contributions are under [AGPL-3.0-only](LICENSE); add any new dependency to
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Discuss changes to the public
+library API, system requirements or distribution before relying on them.
