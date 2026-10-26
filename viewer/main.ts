@@ -8,7 +8,14 @@ const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySe
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 const fmt = (n: number, d = 3) => (Math.abs(n) >= 1000 ? n.toLocaleString("en-US", { maximumFractionDigits: 2 }) : String(Math.round(n * 10 ** d) / 10 ** d));
 const hexOf = (rgb: number) => "#" + rgb.toString(16).padStart(6, "0");
-const parentDir = (p: string) => p.slice(0, Math.max(1, p.lastIndexOf("/")));
+const fileName = (p: string) => p.split(/[\\/]/).pop()!;
+const parentDir = (p: string) => {
+  const normalized = p.replace(/\\/g, "/");
+  const i = normalized.lastIndexOf("/");
+  return normalized.slice(0, i === 2 && normalized[1] === ":" ? 3 : Math.max(1, i));
+};
+const drawingCache = new Map<string, { drawing: Drawing; etag: string; version: string }>();
+let openController: AbortController | null = null;
 
 interface LintPayload {
   findings: Finding[];
@@ -451,17 +458,37 @@ async function open(path: string, opts: { hash?: string } = {}) {
   url.searchParams.set("file", path);
   url.hash = opts.hash ?? "";
   history.replaceState(null, "", url);
-  overlay("Opening… DWG is read by the sidecar on first open, then cached.");
+  openController?.abort();
+  const controller = openController = new AbortController();
+  let phase = `Reading ${fileName(path)}. First opens can take longer`;
+  const started = performance.now();
+  const showProgress = () => {
+    if (request === openRequest) overlay(`${phase} · ${Math.floor((performance.now() - started) / 1000)}s elapsed`);
+  };
+  showProgress();
+  const progressTimer = window.setInterval(showProgress, 1000);
+  // Let the browser paint feedback before starting work.
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   $("#empty").classList.add("hidden");
   const t0 = performance.now();
   try {
-    const res = await fetch(`/api/drawing?file=${encodeURIComponent(path)}`);
-    if (!res.ok) throw new Error((await res.json()).error ?? res.statusText);
+    const hit = drawingCache.get(path);
+    const res = await fetch(`/api/drawing?file=${encodeURIComponent(path)}`, {
+      headers: hit ? { "If-None-Match": hit.etag } : {}, signal: controller.signal,
+    });
+    if (!res.ok && res.status !== 304) throw new Error((await res.json()).error ?? res.statusText);
     const serverMs = Number(res.headers.get("x-omakase-cadkit-ms") ?? res.headers.get("x-drawkit-ms") ?? 0);
-    const cached = (res.headers.get("x-omakase-cadkit-cached") ?? res.headers.get("x-drawkit-cached")) === "true";
-    const version = res.headers.get("x-omakase-cadkit-file-version") ?? "";
-    const loaded = (await res.json()) as Drawing;
+    const cached = res.status === 304 || (res.headers.get("x-omakase-cadkit-cached") ?? res.headers.get("x-drawkit-cached")) === "true";
+    const version = res.status === 304 ? hit!.version : res.headers.get("x-omakase-cadkit-file-version") ?? "";
+    phase = `Preparing ${fileName(path)} for display`;
+    showProgress();
+    const headersMs = performance.now() - t0;
+    const loaded = res.status === 304 ? hit!.drawing : (await res.json()) as Drawing;
     if (request !== openRequest) return;
+    const payloadMs = performance.now() - t0;
+    drawingCache.delete(path);
+    drawingCache.set(path, { drawing: loaded, etag: res.headers.get("etag") ?? hit?.etag ?? "", version });
+    while (drawingCache.size > 3) drawingCache.delete(drawingCache.keys().next().value!);
     drawing = loaded;
     $<HTMLButtonElement>("#properties-button").disabled = false;
     fileVersion = version;
@@ -473,12 +500,19 @@ async function open(path: string, opts: { hash?: string } = {}) {
     restoreViewSettings();
     renderLayers();
     renderMeta();
+    clearInterval(progressTimer);
     overlay(null);
     $("#perf").title = `Entities in the drawing and labels drawn at this zoom\nOpened in ${(performance.now() - t0).toFixed(0)} ms (server ${serverMs} ms, ${cached ? "cached" : "converted"})`;
-    document.title = `${path.split("/").pop()} — omakase-cadkit`;
+    const shownMs = performance.now() - t0;
+    const loadStatus = $("#load-time");
+    loadStatus.textContent = `Opened in ${(shownMs / 1000).toFixed(1)}s`;
+    const details = `Ready to display: ${shownMs.toFixed(0)} ms · ${res.status === 304 ? "reused in browser" : cached ? "cached on server" : "first conversion"}\nServer open: ${serverMs} ms; response headers: ${headersMs.toFixed(0)} ms; payload ready: ${payloadMs.toFixed(0)} ms\n${res.headers.get("server-timing") ?? ""}`;
+    loadStatus.title = details;
+    document.title = `${fileName(path)} — omakase-cadkit`;
     const revision = view.viewRevision;
     await runLint(revision);
     if (request !== openRequest) return;
+    loadStatus.title = `${details}\nChecks complete: ${(performance.now() - t0).toFixed(0)} ms total`;
     applyHash();
     loadRecent();
     void browse(parentDir(drawing.source.path));
@@ -486,6 +520,8 @@ async function open(path: string, opts: { hash?: string } = {}) {
     if (request !== openRequest) return;
     overlay(`Could not open: ${err.message ?? err}`, "error");
     $("#empty").classList.remove("hidden");
+  } finally {
+    clearInterval(progressTimer);
   }
 }
 
@@ -552,23 +588,29 @@ function setBackgroundImage(on: boolean, save = true) {
 }
 $("#background-image").addEventListener("click", () => setBackgroundImage(!view.showImages));
 
-$("#open-button").addEventListener("click", () => {
+async function chooseFolder() {
   showTab("left", "files");
-  void browse(drawing ? parentDir(drawing.source.path) : undefined);
-});
-$("#path-form").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const p = $<HTMLInputElement>("#path").value.trim();
-  if (!p) return;
-  if (/\.(dwg|dxf)$/i.test(p)) open(p);
-  else void browse(p);
-});
+  const button = $<HTMLButtonElement>("#browse-button");
+  button.disabled = true;
+  try {
+    const dir = currentFolder;
+    const res = await fetch(`/api/pick-folder?dir=${encodeURIComponent(dir || "~")}`, { method: "POST" });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error);
+    if (result.folder) await browse(result.folder);
+  } catch (err: any) {
+    $("#dir").innerHTML = `<li class="hint">${esc(err.message)}</li>`;
+  } finally { button.disabled = false; }
+}
+$("#open-button").addEventListener("click", () => void chooseFolder());
+$("#browse-button").addEventListener("click", () => void chooseFolder());
+$("#folder-back").addEventListener("click", () => { if (parentFolder && parentFolder !== currentFolder) void browse(parentFolder); });
 
 function renderMeta() {
   if (!drawing) return;
   const d = drawing;
   const title = $("#doc-name");
-  title.textContent = d.source.path.split("/").pop()!.replace(/\.(dwg|dxf)$/i, "");
+  title.textContent = fileName(d.source.path).replace(/\.(dwg|dxf)$/i, "");
   title.title = d.source.path;
   title.classList.remove("empty");
   const errors = lint?.counts.error ?? 0;
@@ -734,21 +776,33 @@ $("#search-results").addEventListener("click", (e) => {
 
 async function loadRecent() {
   const r: string[] = await fetch("/api/recent").then((r) => r.json());
-  $("#recent").innerHTML = r.map((p) => `<li data-p="${esc(p)}" title="Open ${esc(p)}"><span class="name">${esc(p.split("/").pop()!)}</span></li>`).join("") || `<li class="hint">No drawings opened yet.</li>`;
+  $("#recent").innerHTML = r.map((p) => `<li data-p="${esc(p)}" title="Open ${esc(p)}"><span class="name">${esc(fileName(p))}</span></li>`).join("") || `<li class="hint">No drawings opened yet.</li>`;
 }
+let currentFolder = "";
+let parentFolder = "";
+let browseRequest = 0;
 async function browse(dir?: string) {
-  const r = await fetch(`/api/files${dir ? "?dir=" + encodeURIComponent(dir) : ""}`).then((r) => r.json());
-  if (r.error) {
-    $("#dir").innerHTML = `<li class="hint">${esc(r.error)}</li>`;
-    return;
+  const request = ++browseRequest;
+  try {
+    const r = await fetch(`/api/files${dir ? "?dir=" + encodeURIComponent(dir) : ""}`).then((r) => r.json());
+    if (request !== browseRequest) return;
+    if (r.error) {
+      $("#dir").innerHTML = `<li class="hint">${esc(r.error)}</li>`;
+      return;
+    }
+    currentFolder = r.dir;
+    parentFolder = r.parent;
+    const field = $("#path");
+    field.textContent = fileName(r.dir.replace(/[\\/]$/, "")) || r.dir;
+    field.title = r.dir;
+    const back = $<HTMLButtonElement>("#folder-back");
+    back.disabled = r.parent === r.dir;
+    back.title = back.disabled ? "At the root folder" : `Back to ${r.parent}`;
+    $("#dir").innerHTML =
+      r.entries.map((e: any) => (e.dir ? `<li class="dir" data-d="${esc(e.path)}" title="Open folder ${esc(e.path)}"><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder" /></svg><span class="name">${esc(e.name)}</span></li>` : `<li data-p="${esc(e.path)}" title="Open ${esc(e.path)}"><span class="name">${esc(e.name)}</span><span class="size">${(e.size / 1e6).toFixed(1)} MB</span></li>`)).join("");
+  } catch (err: any) {
+    if (request === browseRequest) $("#dir").innerHTML = `<li class="hint">${esc(err.message)}</li>`;
   }
-  const field = $<HTMLInputElement>("#path");
-  field.value = r.dir;
-  field.title = r.dir;
-  field.scrollLeft = field.scrollWidth; // keep the folder name, not the root, in view
-  $("#dir").innerHTML =
-    `<li class="dir" data-d="${esc(r.parent)}" title="Up to ${esc(r.parent)}"><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron-left" /></svg><span class="name">..</span></li>` +
-    r.entries.map((e: any) => (e.dir ? `<li class="dir" data-d="${esc(e.path)}" title="Open folder ${esc(e.path)}"><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder" /></svg><span class="name">${esc(e.name)}</span></li>` : `<li data-p="${esc(e.path)}" title="Open ${esc(e.path)}"><span class="name">${esc(e.name)}</span><span class="size">${(e.size / 1e6).toFixed(1)} MB</span></li>`)).join("");
 }
 for (const id of ["#recent", "#dir"])
   $(id).addEventListener("click", (e) => {

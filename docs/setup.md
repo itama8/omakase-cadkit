@@ -10,7 +10,8 @@ Download the ZIP matching your computer from the [latest
 prerelease](https://github.com/itama8/omakase-cadkit/releases/tag/v0.1.0-alpha.1), unzip it into a folder
 you keep, and launch it. The archive carries its own Node runtime and a prebuilt
 DWG/DXF sidecar, so it needs no Node, no .NET, no build step and no internet after
-the download.
+the download. There is no `setup.cmd` in this ZIP because the app is already built;
+`launch.cmd` is the correct Windows entry point.
 
 | Platform | File to download | Launch |
 |---|---|---|
@@ -38,6 +39,20 @@ macOS may refuse an unsigned download. Right-click `launch.command` and choose
 **Open** once, or run `xattr -dr com.apple.quarantine omakase-cadkit-*` in the folder
 you extracted. Keeping the folder together matters: the runtime and sidecar live
 inside it.
+
+### Opening improvements in source and the next download
+
+The folder icons in the header and **Files** panel open a system folder picker. Choose a
+folder, then click a drawing in its file list. Use the curved back arrow beside
+the folder name to return to its parent. The folder name is read-only. Windows
+and macOS use built-in dialogs; Linux needs Zenity or KDialog on the desktop.
+The Files panel starts in the last drawing's folder on subsequent launches.
+
+While a drawing opens, the viewer shows the filename and elapsed time. Afterward,
+hover **Opened in …** in the status bar for server, payload and display timings;
+include those timings when reporting slow loads. The last three drawing payloads
+are retained in the browser and checked for file changes before reuse.
+These changes are not in the previously published `v0.1.0-alpha.1` ZIP.
 
 ## Set up a source checkout
 

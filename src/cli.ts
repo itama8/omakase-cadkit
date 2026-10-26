@@ -302,7 +302,7 @@ async function health(port: number): Promise<Health | null> {
 function openBrowser(url: string) {
   const [cmd, args] =
     process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]];
-  const child = spawn(cmd, args as string[], { detached: true, stdio: "ignore" });
+  const child = spawn(cmd, args as string[], { detached: true, windowsHide: true, stdio: "ignore" });
   child.on("error", () => process.stderr.write(`could not start a browser (${cmd}); open the URL above\n`));
   child.unref();
 }
@@ -324,7 +324,7 @@ async function cmdView(file: string | undefined, flags: Flags) {
   if (!up) {
     const server = ["server.js", "server.ts"].map((f) => path.join(import.meta.dirname, f)).find((f) => existsSync(f));
     if (!server) throw new Error("viewer server entry not found: run `npm run build`");
-    const child = spawn(process.execPath, [server, "--port", String(port)], { detached: true, stdio: "ignore" });
+    const child = spawn(process.execPath, [server, "--port", String(port)], { detached: true, windowsHide: true, stdio: "ignore" });
     child.unref();
     for (let i = 0; i < 50 && !(await health(port)); i++) await new Promise((r) => setTimeout(r, 100));
     if (!(await health(port))) throw new Error(`the viewer server did not start on port ${port}; try \`omakase-cadkit serve --port ${port}\` to see why`);

@@ -79,7 +79,7 @@ export class Sidecar {
   private start(): ChildProcessWithoutNullStreams {
     if (this.proc) return this.proc;
     const { cmd, args, env } = sidecarCommand();
-    const proc = spawn(cmd, [...args, "serve"], { env, stdio: ["pipe", "pipe", "pipe"] });
+    const proc = spawn(cmd, [...args, "serve"], { env, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
     proc.stdout.setEncoding("utf8");
     proc.stdout.on("data", (chunk: string) => this.onData(chunk));
     proc.stderr.setEncoding("utf8");

@@ -30,6 +30,7 @@
         <rect x="3.5" y="4.5" width="17" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" />
         <path d="M14.5 4.5v15" stroke="currentColor" stroke-width="1.5" />
       </symbol>
+      <symbol id="i-folder-back" viewBox="0 0 24 24"><path d="m9 4-5 5 5 5M4 9h9a7 7 0 0 1 7 7v4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></symbol>
       <symbol id="i-back" viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
       <symbol id="i-image" viewBox="0 0 24 24">
         <rect x="4" y="5.5" width="16" height="13" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6" />
@@ -99,7 +100,7 @@
       </a>
       <div id="doc-title">
         <h1 id="doc-name" class="empty" title="Open a drawing from Files, or with the folder button">No drawing open</h1>
-        <button id="open-button" class="icon-btn" title="Open a drawing: browse folders in the Files tab" aria-label="Open a drawing">
+        <button id="open-button" class="icon-btn" title="Choose a drawing folder" aria-label="Choose a drawing folder">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder" /></svg>
         </button>
       </div>
@@ -122,7 +123,7 @@
       <div class="resizer col" data-resize="left" role="separator" aria-orientation="vertical" aria-label="Resize left panel" tabindex="0" title="Drag to resize, double-click to reset"></div>
       <nav class="tabs" data-for="left">
         <button class="panel-collapse icon-btn" data-collapse="left" aria-label="Collapse layers and files" title="Collapse panel: its tabs stay on the window edge">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron-left" /></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close" /></svg>
         </button>
         <button data-tab="layers" class="on" title="Layers: show, hide or isolate drawing layers">Layers</button>
         <button data-tab="search" title="Find text in the drawing (/)">Find</button>
@@ -157,14 +158,11 @@
         <p class="pane-foot"><kbd>/</kbd> focuses search from the drawing.</p>
       </section>
       <section data-pane="files" class="pane">
-        <div class="pane-head"><span class="micro-label">Browse</span></div>
-        <form id="path-form" class="row tools">
-          <div class="field">
-            <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-target" /></svg>
-            <input id="path" type="text" spellcheck="false" placeholder="Path to a folder or drawing" autocomplete="off" aria-label="Folder or drawing path" title="Type a folder or drawing path and press Enter" />
-          </div>
-          <button type="submit" class="ghost" title="Open this folder or drawing">Go</button>
-        </form>
+        <div class="pane-head"><span class="micro-label">Drawings</span><button id="browse-button" type="button" class="icon-btn" title="Choose a drawing folder" aria-label="Choose a drawing folder"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder" /></svg></button></div>
+        <div class="row tools folder-location">
+          <span id="path" class="folder-name" aria-label="Current folder"></span>
+          <button id="folder-back" type="button" class="icon-btn" title="Back to parent folder" aria-label="Back to parent folder" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder-back" /></svg></button>
+        </div>
         <ul id="dir" class="list files"></ul>
         <div class="resizer row-split" data-resize="recent" role="separator" aria-orientation="horizontal" aria-label="Resize recent files" tabindex="0" title="Drag to resize, double-click to reset"></div>
         <div class="pane-head"><span class="micro-label">Recent</span></div>
@@ -250,7 +248,7 @@
           <text x="204" y="126" class="empty-art-label" text-anchor="end">1:500 · A1</text>
         </svg>
         <h1>Open a drawing</h1>
-        <p class="empty-lead">Use the folder button next to the title to browse, pick a recent file under <b>Files</b>, or run <code>omakase-cadkit view &lt;file&gt;</code>.</p>
+        <p class="empty-lead">Choose a folder with the folder button next to the title, then select a drawing. Recent drawings are under <b>Files</b>.</p>
         <div class="empty-keys">
           <span><kbd>F</kbd> fit sheet</span>
           <span><kbd>wheel</kbd> zoom</span>
@@ -268,7 +266,7 @@
         <button data-tab="inspect" title="Inspect: properties of the entity you clicked">Inspect</button>
         <button data-tab="sheet" title="Sheet: units, sheet frames, paper and scale">Sheet</button>
         <button class="panel-collapse icon-btn" data-collapse="right" aria-label="Collapse findings, inspect and sheet" title="Collapse panel: its tabs stay on the window edge">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron-right" /></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close" /></svg>
         </button>
       </nav>
       <section data-pane="findings" class="pane on">
@@ -303,6 +301,7 @@
       <span class="status-item" title="Scale measured from the sheet frame"><span class="micro-label">Sheet</span> <span id="sheet-scale">—</span></span>
       <span id="meta" class="status-meta"></span>
       <span id="perf" class="status-item"></span>
+      <span id="load-time" class="status-item"></span>
       <span class="status-item status-end micro-label" title="The viewer draws model space; paper-space layouts are not shown">model space</span>
     </footer>
 

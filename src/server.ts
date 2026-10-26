@@ -13,6 +13,7 @@ import { rasterCandidates, resolveRaster } from "./rasters.ts";
 import { buildStamp } from "./sidecar.ts";
 import { CACHE_DIR, DrawingStore, expandHome } from "./store.ts";
 import { resolveUnits } from "./sheet.ts";
+import { pickFolder } from "./file-picker.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const VIEWER = path.join(ROOT, "viewer");
@@ -53,6 +54,7 @@ const fileParam = (url: URL) => {
 export function startServer(port = 4280, host = "127.0.0.1") {
   const store = new DrawingStore(4);
   const ctxCache = new Map<string, { key: unknown; config: string; ctx: ReturnType<typeof makeContext> }>();
+  let picking = false;
 
   async function ctxFor(file: string) {
     const { drawing } = await store.open(file);
@@ -102,7 +104,14 @@ export function startServer(port = 4280, host = "127.0.0.1") {
         pushRecent(DrawingStore.resolve(file));
         // Lets the viewer tell whether the file changed since it last saved view settings for it.
         const st = statSync(DrawingStore.resolve(file));
-        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store", "content-encoding": "gzip", "x-omakase-cadkit-ms": String(r.ms), "x-omakase-cadkit-cached": String(r.cached), "x-omakase-cadkit-file-version": `${st.size}-${Math.floor(st.mtimeMs)}` });
+        const etag = `"${path.basename(r.payloadPath)}"`;
+        if (r.timings) res.setHeader("Server-Timing", `read;dur=${r.timings.readMs}, emit;dur=${r.timings.writeMs}, parse;dur=${r.timings.parseMs}`);
+        if (req.headers["if-none-match"] === etag) {
+          res.writeHead(304, { etag, "cache-control": "no-cache" });
+          res.end();
+          return;
+        }
+        res.writeHead(200, { etag, "content-type": "application/json", "cache-control": "no-store", "content-encoding": "gzip", "x-omakase-cadkit-ms": String(r.ms), "x-omakase-cadkit-cached": String(r.cached), "x-omakase-cadkit-file-version": `${st.size}-${Math.floor(st.mtimeMs)}` });
         createReadStream(r.payloadPath).pipe(createGzip({ level: 4 })).pipe(res);
         return;
       }
@@ -137,8 +146,20 @@ export function startServer(port = 4280, host = "127.0.0.1") {
         return json(res, 200, n ?? { manholes: [], pipes: [] }, req);
       }
       if (url.pathname === "/api/recent") return json(res, 200, recent().filter((f) => existsSync(f)));
+      if (url.pathname === "/api/pick-folder") {
+        if (req.method !== "POST") return json(res, 405, { error: "Use POST." });
+        if (req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: "Choose folders from this viewer." });
+        if (picking) return json(res, 409, { error: "A folder picker is already open." });
+        picking = true;
+        try {
+          const folder = expandHome(url.searchParams.get("dir") || "~");
+          return json(res, 200, { folder: await pickFolder(folder) });
+        } finally { picking = false; }
+      }
       if (url.pathname === "/api/files") {
-        const dir = path.resolve(expandHome(url.searchParams.get("dir") || "~"));
+        const requested = url.searchParams.get("dir");
+        const lastFile = !requested ? recent().find((f) => existsSync(f)) : undefined;
+        const dir = path.resolve(expandHome(requested || (lastFile ? path.dirname(lastFile) : "~")));
         const entries = readdirSync(dir, { withFileTypes: true })
           .filter((d) => !d.name.startsWith("."))
           .map((d) => {

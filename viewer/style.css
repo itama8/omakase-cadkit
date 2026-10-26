@@ -1186,3 +1186,7 @@ dialog::backdrop { background: #000000a6; backdrop-filter: blur(3px); }
 #properties-apply { padding: 8px 16px; }
 button.meta-units { cursor: pointer; }
 button.meta-units:hover { color: var(--text); border-color: var(--accent); }
+
+.folder-location { min-width: 0; }
+.folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+#folder-back { flex: none; }

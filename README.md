@@ -63,7 +63,8 @@ alpha limits and reporting are in [trying an alpha](docs/setup.md#trying-an-alph
 ## Use
 
 Run `omakase-cadkit` with no arguments to launch the app with no drawing loaded.
-Use the folder icon or recent drawings to open a file. From the source checkout,
+Use the folder icon to choose a folder, then select a drawing from its file list,
+or open a recent drawing. From the source checkout,
 `node bin/omakase-cadkit.mjs` does the same.
 
 ```bash
@@ -87,7 +88,7 @@ or `#f=N`, so an agent can hand over an exact place.
 Drag with the left or middle button to pan; use the wheel or the +/− buttons to zoom.
 The toolbar in the bottom-right corner has Back (also `Alt+Left`), Fit, zoom and the background
 image switch; drawing facts (version, units, errors and warnings) sit in the status bar. Collapse
-a side panel with the chevron on its outer edge: its tabs stay as a ribbon on the window edge,
+a side panel with the cross on its outer edge: its tabs stay as a ribbon on the window edge,
 which you can drag up or down and click to reopen that tab. Selecting a finding keeps the finding list open, highlights it on the drawing and
 shows **How to fix**: AutoCAD commands with what each does, plus icon buttons for **Copy AutoCAD selection**
 (AutoLISP to paste at the command line; needs full AutoCAD or LT 2024+) and **Copy handles**.

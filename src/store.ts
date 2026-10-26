@@ -32,6 +32,7 @@ export interface OpenResult {
   payloadPath: string;
   cached: boolean;
   ms: number;
+  timings?: { readMs: number; writeMs: number; parseMs: number };
 }
 
 export class DrawingStore {
@@ -78,19 +79,22 @@ export class DrawingStore {
     mkdirSync(CACHE_DIR, { recursive: true });
     const payloadPath = path.join(CACHE_DIR, createHash("sha1").update(key).digest("hex").slice(0, 20) + ".json");
     let cached = true;
+    let timings: OpenResult["timings"];
     let drawing = existsSync(payloadPath) ? readPayload(payloadPath) : null;
     if (!drawing || drawing.schema !== PAYLOAD_SCHEMA) {
       cached = false;
       rmSync(payloadPath, { force: true });
-      await this.sidecar.request("open", { path: real, out: payloadPath }, 300_000);
+      const conversion = await this.sidecar.request<{ readMs: number; writeMs: number }>("open", { path: real, out: payloadPath }, 300_000);
+      const parseStart = Date.now();
       const fresh = readPayload(payloadPath);
+      timings = { readMs: conversion.readMs, writeMs: conversion.writeMs, parseMs: Date.now() - parseStart };
       if (!fresh) throw new Error(`sidecar wrote no payload for ${real}`);
       if (fresh.schema !== PAYLOAD_SCHEMA) throw new Error(`unsupported payload schema ${fresh.schema}`);
       drawing = fresh;
     }
     this.memory.set(real, { key, drawing, payloadPath });
     while (this.memory.size > this.maxInMemory) this.memory.delete(this.memory.keys().next().value!);
-    return { drawing, payloadPath, cached, ms: Date.now() - t0 };
+    return { drawing, payloadPath, cached, ms: Date.now() - t0, timings };
   }
 
   convert(input: string, out: string) {

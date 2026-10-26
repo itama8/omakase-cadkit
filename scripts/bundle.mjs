@@ -85,11 +85,13 @@ copy("scripts/launch.ps1");
 writeFileSync(path.join(stage, "START-HERE.txt"), `omakase-cadkit ${pkg.version} — alpha
 
 1. Keep this folder where you unzipped it. It contains everything the app needs.
+   No setup.cmd is needed: this download is already built.
 2. Launch: double-click ${win ? "launch.cmd" : "launch.command"}
    (macOS: if the system refuses to run it, right-click it and choose Open, or run
    "xattr -dr com.apple.quarantine ." once in this folder.)
-3. The viewer opens at http://127.0.0.1:4280/ — open a drawing with the folder icon,
-   or launch straight onto one:
+3. The viewer opens at http://127.0.0.1:4280/ — use the folder icon in the header or Files panel.
+   Choose a folder in the system picker, then click a drawing in the file list.
+   The curved back arrow returns to the parent folder. Or launch onto a drawing:
    ${win ? "launch.cmd" : "bash launch.command"} view "C:\\path\\to\\drawing.dwg"
 4. Sample drawings are in fixtures/. Try ${win ? "launch.cmd" : "bash launch.command"} lint fixtures${win ? "\\" : "/"}sewer_bad.dxf
 
