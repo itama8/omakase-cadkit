@@ -1,15 +1,16 @@
-// Opens drawings through the sidecar and caches payloads on disk (keyed by path, size and
-// mtime) and the most recent few in memory.
+// Opens drawings through the sidecar and caches payloads on disk (keyed by path, size, mtime
+// and the sidecar build that wrote them) and the most recent few in memory.
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, rmSync, statSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { Sidecar } from "./sidecar.ts";
+import { Sidecar, sidecarBuild } from "./sidecar.ts";
 import type { Drawing } from "./types.ts";
 
 export const CACHE_DIR = process.env.OMAKASE_CADKIT_CACHE ?? process.env.DRAWKIT_CACHE ?? path.join(process.env.XDG_CACHE_HOME ?? path.join(homedir(), ".cache"), "omakase-cadkit");
-const PAYLOAD_SCHEMA = 7;
+const PAYLOAD_SCHEMA = 8;
+const SIDECAR_BUILD = sidecarBuild();
 
 function readPayload(file: string): Drawing | null {
   try {
@@ -53,7 +54,7 @@ export class DrawingStore {
 
   private static key(real: string): string {
     const st = statSync(real);
-    return `${real}\0${st.size}\0${Math.floor(st.mtimeMs)}`;
+    return `${real}\0${st.size}\0${Math.floor(st.mtimeMs)}\0${SIDECAR_BUILD}`;
   }
 
   async open(file: string): Promise<OpenResult> {

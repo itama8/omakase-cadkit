@@ -47,6 +47,22 @@ export function buildStamp(): string {
   return String(Math.floor(newest));
 }
 
+/**
+ * Identifies the sidecar build that writes payloads: size and mtime of its binary. Payloads are
+ * cached per build, so a renderer change is never hidden behind a payload the old one wrote.
+ */
+export function sidecarBuild(): string {
+  const dir = process.env.OMAKASE_CADKIT_SIDECAR_DIR ?? process.env.DRAWKIT_SIDECAR_DIR ?? path.join(ROOT, "bin", "sidecar");
+  for (const name of ["omakase-cadkit-sidecar.dll", "omakase-cadkit-sidecar.exe", "omakase-cadkit-sidecar"]) {
+    const file = path.join(dir, name);
+    if (existsSync(file)) {
+      const st = statSync(file);
+      return `${st.size}-${Math.floor(st.mtimeMs)}`;
+    }
+  }
+  return "unbuilt";
+}
+
 interface Pending {
   resolve: (v: any) => void;
   reject: (e: Error) => void;

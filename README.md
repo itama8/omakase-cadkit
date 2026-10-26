@@ -104,7 +104,12 @@ rescale or edit the DWG. The panel keeps the original file-header units visible 
 The renderer reuses image tiles while panning, rendering only newly exposed strips, and skips geometry smaller than a pixel
 at sheet scale; those details appear as you zoom in. Linked raster underlays (`IMAGE`) draw beneath the
 vector geometry when the referenced file is next to the drawing; the viewer streams it from the local
-server. Inspection and lint still use the full source geometry.
+server. Embedded OLE pictures and cached Excel table presentations draw without external assets.
+Text wraps using inline font/height/width settings, and bundled Arimo/Tinos faces are fitted to the
+laid-out widths. Leaders include arrowheads; wide polylines, solid fills, simple dashed linetypes
+and bounded hatch patterns retain their geometry. The status bar lists missing images, unsupported
+content and reported approximations; click **not drawn** or **approx.** to see the details.
+Inspection and lint still use the full source geometry.
 
 To check viewer interactions and measure delivered pan frames with Chromium, start the
 server and run:
@@ -205,10 +210,21 @@ skills/omakase-cadkit/         agent skill for using omakase-cadkit on drawings
 ## Limits
 
 - Model space only; paper-space layouts and viewports are listed but not drawn.
-- MULTILEADER, REGION, 3D solids and OLE contents are not drawn (counted under `unrendered`).
+- REGION, 3D solids and unsupported OLE presentations are not drawn (counted under `unrendered`).
+  OLE support covers cached EMF vector tables and DIB bitmaps, including the two-pass masked logos
+  found in the trial drawings. WMF presentations need an embedded EMF; arbitrary EMF+/WMF drawing
+  operations, clipping and raster operations are not fully supported.
 - Linked rasters draw in the viewer; SVG render embeds them only when the file is present and at most
   6 MB, so a large satellite backdrop is drawn in the viewer but left out of exported SVG.
-- Hatch patterns draw as translucent fills; linetypes draw solid.
+- Dense hatch patterns fall back to a reported tint. Gradients use one colour. Complex linetype
+  text/shapes are omitted and reported; wide dashed polylines currently draw continuous bands.
+- SHX fonts use substitute faces; non-Latin glyphs, italic metrics, stacked fractions, oblique and
+  paragraph formatting remain approximate. OLE text uses cached advances with substitute fonts.
+- Plot-style tables and plotted lineweights are not reproduced: strokes use a screen-pixel hairline.
+  The viewport preserves drawing content, but is not a pixel-identical reconstruction of an issued PDF.
+  A DWG and its PDF can also contain different revisions or logos.
+- ACadSharp's DXF LEADER reader defaults the arrow flag off when group 71 is omitted; explicit flags
+  and the tested DWG leaders render their arrowheads. General 3D orientation remains limited.
 - DWG written by ACadSharp round-trips through ACadSharp and LibreDWG; it has not yet been
   opened in AutoCAD itself.
 

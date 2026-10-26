@@ -1,4 +1,4 @@
-// Drawing payload written by the sidecar (schema 7). See sidecar/Program.cs.
+// Drawing payload written by the sidecar (schema 8). See sidecar/Program.cs, Text.cs and Ole.cs.
 
 export type Bbox = [number, number, number, number]; // minX, minY, maxX, maxY (world)
 
@@ -68,22 +68,31 @@ export interface Entity {
 /**
  * Render primitives. Coordinates are relative to `origin`. Each carries the index of the
  * top-level entity it came from, so block content selects its insert.
- *   ["p", ent, layer, rgb, closed, [x,y,...]]        polyline
- *   ["f", ent, layer, rgb, solid, [[x,y,...], ...]] filled geometric loops (even-odd); text-box paths omitted
- *   ["t", ent, layer, rgb, x, y, h, rotRad, align, text, font, wf]
+ *   ["p", ent, layer, rgb, closed, [x,y,...], dash?]  polyline
+ *   ["l", ent, layer, rgb, [x0,y0,x1,y1, ...]]        disjoint segments (hatch pattern lines)
+ *   ["f", ent, layer, rgb, mode, [[x,y,...], ...]]    filled loops; text-box paths omitted. mode:
+ *        0 pattern hatch too dense to draw (shown as a tint), 1 solid (even-odd islands),
+ *        2 solid union of overlapping pieces (nonzero: wide polylines), 3 picking area only
+ *        (its pattern or picture is drawn by other primitives)
+ *   ["t", ent, layer, rgb, x, y, h, rotRad, align, text, font, wf, width]
  *        h = capital height (AutoCAD text height); align = l|c|r + b|m|t, top and middle
- *        refer to the capitals; font = sans|serif; wf = width factor (horizontal stretch)
- *   ["d", ent, layer, rgb, x, y]                     point
- *   ["c", ent, layer, rgb, x, y, r]                  circle
- *   ["a", ent, layer, rgb, x, y, r, a0, a1]          ccw arc, radians
+ *        refer to the capitals; font = sans|serif, then |b, |i or |bi; wf = width factor;
+ *        width = laid-out advance in world units, which drawn glyphs are fitted to
+ *   ["d", ent, layer, rgb, x, y]                       point
+ *   ["c", ent, layer, rgb, x, y, r, dash?]             circle
+ *   ["a", ent, layer, rgb, x, y, r, a0, a1, dash?]     ccw arc, radians
+ * dash indexes `Drawing.dashes`; strokes without it are continuous.
  */
 export type Prim =
-  | ["p", number, number, number, 0 | 1, number[]]
-  | ["f", number, number, number, 0 | 1, number[][]]
-  | ["t", number, number, number, number, number, number, number, string, string, "sans" | "serif", number]
+  | ["p", number, number, number, 0 | 1, number[], number?]
+  | ["l", number, number, number, number[]]
+  | ["f", number, number, number, FillMode, number[][]]
+  | ["t", number, number, number, number, number, number, number, string, string, string, number, number]
   | ["d", number, number, number, number, number]
-  | ["c", number, number, number, number, number, number]
-  | ["a", number, number, number, number, number, number, number, number];
+  | ["c", number, number, number, number, number, number, number?]
+  | ["a", number, number, number, number, number, number, number, number, number?];
+
+export type FillMode = 0 | 1 | 2 | 3;
 
 /** One drawn IMAGE in world space: a top-level image or one placed by an INSERT. */
 export interface Raster {
@@ -103,10 +112,12 @@ export interface Raster {
   fade: number;
   /** Clip boundary in image pixel coordinates, when clipping is on. */
   clip?: [number, number][];
+  /** Key into `Drawing.images` for a picture embedded in the drawing (OLE objects). */
+  src?: string;
 }
 
 export interface Drawing {
-  schema: 7;
+  schema: 8;
   source: { path: string; format: string; bytes: number };
   acadVersion: string;
   header: { insUnits: string; insUnitsCode: number; extMin: [number, number]; extMax: [number, number]; ltScale: number };
@@ -117,8 +128,15 @@ export interface Drawing {
   prims: Prim[];
   /** Images to draw beneath the primitives, in draw order. */
   rasters: Raster[];
+  /** Pictures embedded in the drawing, as data URLs, keyed by content hash. */
+  images: Record<string, string>;
+  /** Linetype dash patterns in world units: dash, gap, dash, gap ...; 0 is a dot. */
+  dashes: number[][];
   entities: Entity[];
+  /** Entities, or parts of them, not drawn at all, with counts. */
   unrendered: Record<string, number>;
+  /** Drawn, but not as the file specifies (substitute faces for SHX fonts, gradients in one colour), with counts. */
+  approximated: Record<string, number>;
   notes: Record<string, number>;
   emitErrors: string[];
 }

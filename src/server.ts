@@ -9,6 +9,7 @@ import { createGzip } from "node:zlib";
 import { loadConfig, saveUnits } from "./config.ts";
 import { lintContext, makeContext, RULES } from "./lint/engine.ts";
 import { sewerNetwork } from "./lint/sewer.ts";
+import { rasterCandidates, resolveRaster } from "./rasters.ts";
 import { buildStamp } from "./sidecar.ts";
 import { CACHE_DIR, DrawingStore, expandHome } from "./store.ts";
 import { resolveUnits } from "./sheet.ts";
@@ -42,22 +43,6 @@ function pushRecent(file: string) {
 }
 
 const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".map": "application/json", ".woff2": "font/woff2" };
-const RASTER_TYPES: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
-const RASTER_LIMIT = 64 * 1024 * 1024;
-
-function resolveRaster(drawing: string, ref: string) {
-  const dir = path.dirname(drawing);
-  const normalized = ref.replace(/\\/g, "/");
-  const base = path.basename(normalized);
-  for (const candidate of [normalized, path.resolve(dir, normalized), path.join(dir, base)]) {
-    const abs = path.resolve(candidate);
-    const type = RASTER_TYPES[path.extname(abs).toLowerCase()];
-    if (!type || !existsSync(abs)) continue;
-    const stat = statSync(abs);
-    if (stat.isFile() && stat.size <= RASTER_LIMIT) return { abs, type, size: stat.size };
-  }
-  return null;
-}
 
 const BUILD = buildStamp();
 const fileParam = (url: URL) => {
@@ -130,7 +115,7 @@ export function startServer(port = 4280, host = "127.0.0.1") {
         const placed = drawing.rasters.find((r) => r.h.toUpperCase() === handle.toUpperCase());
         if (!placed) return json(res, 404, { error: "no raster on that entity" });
         const raster = resolveRaster(real, placed.file);
-        if (!raster) return json(res, 404, { error: `raster ${placed.file} is missing or not a supported image` });
+        if (!raster) return json(res, 404, { error: `raster ${placed.file} is missing or not a supported image`, file: placed.file, tried: rasterCandidates(real, placed.file) });
         res.writeHead(200, { "content-type": raster.type, "content-length": String(raster.size), "cache-control": "no-store" });
         createReadStream(raster.abs).pipe(res);
         return;

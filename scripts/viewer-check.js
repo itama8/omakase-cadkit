@@ -52,7 +52,7 @@
     v.setDrawing({ ...originalDrawing, origin: [0, 0], entities: [{ h: 'TEST', type: 'LINE', layer: 0, color: 0xffffff }], prims: [
       ['p', 0, 0, 0xff0000, 0, [-2000, 0, 2000, 0]],
       ['p', 0, 0, 0x00ff00, 0, [0, -2000, 0, 2000]],
-      ['t', 0, 0, 0xffffff, 256, -30, 14, 0, 'lb', 'Across a tile boundary'],
+      ['t', 0, 0, 0xffffff, 256, -30, 14, 0, 'lb', 'Across a tile boundary', 'sans', 1, 200],
     ] });
     v.cx = v.cy = 0; v.scale = 1; v.draw();
     v.panBy(380, 170); v.draw();

@@ -49,7 +49,7 @@
     "dist/",
     "bin/omakase-cadkit.mjs",
     "bin/drawkit.mjs",
-    "sidecar/Program.cs",
+    "sidecar/*.cs",
     "sidecar/OmakaseCadkitSidecar.csproj",
     "viewer/index.html",
     "viewer/style.css",

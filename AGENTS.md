@@ -17,9 +17,9 @@ omakase-cadkit on drawings (not developing it) is covered by `skills/omakase-cad
 
 ## Commands
 
-- `npm run build:sidecar` after any change to `sidecar/Program.cs`. The payload cache is keyed
-  by file path, size and mtime, not by sidecar version: clear `~/.cache/omakase-cadkit` after a
-  payload change.
+- `npm run build:sidecar` after any change to `sidecar/*.cs`. Payload cache keys include
+  file path, size, mtime and the sidecar build. Restart a running server after rebuilding;
+  old JSON payloads can be removed from `~/.cache/omakase-cadkit` without deleting preferences.
 - `npm run build:viewer` after any change under `viewer/`.
 - `npm run build:lib` after any change under `src/`: `bin/` and the package entry run
   `dist/`, not the sources. `npm run setup` and `npm run build` include it.

@@ -22,6 +22,14 @@ Name "Plex", licensed under SIL OFL 1.1. The upstream license is preserved in
 [licenses/IBMPlex-OFL.txt](licenses/IBMPlex-OFL.txt). No font file has been
 modified; only the latin subset files are redistributed.
 
+## Arimo and Tinos
+
+Drawing text uses the unmodified Latin WOFF2 subsets of Arimo and Tinos from
+`@fontsource/arimo` and `@fontsource/tinos` 5.3.0 (regular, bold, italic and bold italic).
+Both are licensed under SIL OFL 1.1; their upstream license texts are preserved in
+[licenses/Arimo-OFL.txt](licenses/Arimo-OFL.txt) and
+[licenses/Tinos-OFL.txt](licenses/Tinos-OFL.txt).
+
 ## Toolchains and future distributions
 
 Node.js, .NET, uv, Python, ezdxf, TypeScript, esbuild, and optional renderers are

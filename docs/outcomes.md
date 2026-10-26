@@ -28,7 +28,7 @@ size, in its style face, wrapped to its MTEXT box ([s04](../.devlog/2026-10-26-s
 
 | ID | Desired outcome | State | Evidence needed to call it done | Next action |
 |---|---|---|---|---|
-| O5 | Drawing reviewers can trust the documented fidelity and findings on a broader set of drawings. | partial | Publicly shareable fixtures and second-source checks support each expanded claim; current rendering limits remain visible. | Hatch text-box metadata is filtered out of geometric fills, preserving continuous frames and hollow interiors in viewer and SVG. Synthetic edge-pixel checks and a real-DWG spot check passed. Review the corrected symbols; CAD fonts, hatch textures, linetypes and layouts remain open. [Evidence](../.devlog/2026-10-25-s14.md). |
+| O5 | Drawing reviewers can trust the documented fidelity and findings on a broader set of drawings. | partial | Publicly shareable fixtures and second-source checks support each expanded claim; current rendering limits remain visible. | Text runs wrap and fit their boxes; cached OLE tables/logos, leader arrows, polyline widths, simple dashes and bounded hatch patterns now draw in viewer and SVG. Seven trial DWGs read without emission errors; representative PDF crops and synthetic browser pixels checked. Review those details in the viewer next; plot styles/lineweights, exact fonts, layouts and broader OLE support remain open. [Evidence](../.devlog/2026-10-26-s10.md). |
 
 ## How to use this map
 
@@ -49,4 +49,4 @@ Borrowed from Omakase: read current state before deeper history, separate accept
 from implementation, choose a runnable next action, and keep evidence in devlogs.
 This repository has no dependency on Omakase's skills, plans, or tooling.
 
-Latest evidence: [2026-10-26-s09](../.devlog/2026-10-26-s09.md).
+Latest evidence: [2026-10-26-s10](../.devlog/2026-10-26-s10.md).

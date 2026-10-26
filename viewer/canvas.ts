@@ -1,10 +1,10 @@
 // Canvas renderer for a omakase-cadkit payload. Framework-free so it can move into another host
 // (the Omakase renderer) unchanged: give it a canvas, a payload, and call draw().
 //
-// Strokes and fills are batched into Path2D objects per (tile, layer, colour) in drawing
-// coordinates. Fills stay independent so even-odd holes do not
-// cancel neighboring hatches. Text is
-// drawn per item in screen space, fading out below 3 px and skipped below 1.5 px.
+// Strokes and fills are batched into Path2D objects per (tile, layer, colour, dash) in drawing
+// coordinates. Fills stay independent so even-odd holes do not cancel neighboring hatches.
+// Text is drawn per item in screen space, fitted to the width the sidecar laid it out at,
+// fading out below 3 px and skipped below 1.5 px.
 
 import type { Bbox, Drawing, Finding, Prim, Raster } from "../src/types.ts";
 
@@ -38,7 +38,10 @@ export const LIGHT: Theme = {
 interface Batch {
   layer: number;
   color: string;
-  kind: "stroke" | "fillSolid" | "fillPattern" | "dot";
+  /** fillSolid: even-odd; fillUnion: nonzero (wide polylines); fillPattern: tint for a hatch too dense to draw */
+  kind: "stroke" | "fillSolid" | "fillUnion" | "fillPattern" | "dot";
+  /** Index into the drawing's dash patterns, for dashed strokes. */
+  dash?: number;
   path: Path2D;
   maxSize: number; // upper bound on primitive size in this batch; enables subpixel culling
   dots: number[];
@@ -72,15 +75,20 @@ const RASTER_BLEED = 3;
 /** Text fades out between these heights in screen pixels, so labels thin out over a few zoom steps rather than vanish at once. */
 const TEXT_FULL_PX = 3;
 const TEXT_MIN_PX = 1.5;
-// AutoCAD text height is the capital height; em per capital height for each face
-// (matches SansEmPerCap / SerifEmPerCap in the sidecar).
-const EM_PER_CAP = { sans: 1 / 0.72, serif: 1.47 };
+// AutoCAD text height is the capital height. Font size per capital height for the bundled
+// faces (Arimo's capitals are 0.688 em, Tinos's 0.655; AutoCAD's Times capitals are 0.973 of
+// the height). Widths come from the primitive, so these only set the glyph height.
+const EM_PER_CAP = { sans: 1 / 0.688, serif: 0.973 / 0.655 };
 const FONT = {
-  sans: `"Inter", "Helvetica Neue", Arial, "Liberation Sans", sans-serif`,
-  serif: `"Times New Roman", Times, "Liberation Serif", serif`,
+  sans: `"Cadkit Sans", Arimo, "Liberation Sans", Arial, sans-serif`,
+  serif: `"Cadkit Serif", Tinos, "Liberation Serif", "Times New Roman", serif`,
 };
-// average advance per character, in text heights (bbox and hit testing)
-const CHAR_W = 0.8;
+/** Canvas font shorthand for a text primitive's font field (sans|serif, then |b, |i or |bi). */
+function fontFor(font: string, px: number): string {
+  const [family, style = ""] = font.split("|");
+  const face = family === "serif" ? "serif" : "sans";
+  return `${style.includes("i") ? "italic " : ""}${style.includes("b") ? "bold " : ""}${(px * EM_PER_CAP[face]).toFixed(1)}px ${FONT[face]}`;
+}
 /** Wheel zoom stretches cached tiles; linework is re-rendered once input has been quiet this long. */
 const ZOOM_SETTLE_MS = 120;
 /** Tile rendering per frame while a stretched stand-in covers the gaps. */
@@ -113,7 +121,14 @@ function cssColor(rgb: Rgb, theme: Theme): string {
 export class DrawingCanvas {
   readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
-  theme: Theme = DARK;
+  private currentTheme: Theme = DARK;
+  get theme(): Theme { return this.currentTheme; }
+  set theme(theme: Theme) {
+    this.currentTheme = theme;
+    // Geometry batches cache resolved colours, while text resolves them at draw time.
+    if (this.drawing) this.buildTiles();
+    this.refresh();
+  }
   drawing: Drawing | null = null;
   private tiles: Tile[] = [];
   private primBox: Float64Array = new Float64Array(0); // 4 per prim, relative coords
@@ -199,6 +214,12 @@ export class DrawingCanvas {
     this.fit();
   }
 
+  /** Redraw everything, e.g. once web fonts have loaded. */
+  refresh() {
+    this.drawingVersion++;
+    this.request();
+  }
+
   setImages(images: RasterOverlay[]) {
     this.images = images;
     this.drawingVersion++;
@@ -257,15 +278,18 @@ export class DrawingCanvas {
         tile.texts.push(i);
         return;
       }
-      const kind: Batch["kind"] = p[0] === "f" ? (p[4] ? "fillSolid" : "fillPattern") : p[0] === "d" ? "dot" : "stroke";
+      // A fill only used for picking draws nothing: its pattern or picture is drawn by other primitives.
+      if (p[0] === "f" && p[4] === 3) return;
+      const kind: Batch["kind"] = p[0] === "f" ? (p[4] === 1 ? "fillSolid" : p[4] === 2 ? "fillUnion" : "fillPattern") : p[0] === "d" ? "dot" : "stroke";
+      const dash = p[0] === "p" ? p[6] : p[0] === "c" ? p[7] : p[0] === "a" ? p[9] : undefined;
       const color = cssColor(p[3], this.theme);
       const size = Math.max(b[2] - b[0], b[3] - b[1], 1e-12);
       const maxSize = p[0] === "d" ? Infinity : 2 ** Math.ceil(Math.log2(size));
       // Independent fills must not cancel each other through even-odd batching.
-      const key = `${p[2]}|${color}|${kind}|${maxSize}${p[0] === "f" ? `|${i}` : ""}`;
+      const key = `${p[2]}|${color}|${kind}|${maxSize}|${dash ?? ""}${p[0] === "f" ? `|${i}` : ""}`;
       let batch = batchMaps[t].get(key);
       if (!batch) {
-        batch = { layer: p[2], color, kind, maxSize, path: new Path2D(), dots: [] };
+        batch = { layer: p[2], color, kind, maxSize, path: new Path2D(), dots: [], dash };
         batchMaps[t].set(key, batch);
         tile.batches.push(batch);
       }
@@ -617,14 +641,19 @@ export class DrawingCanvas {
     ctx.lineCap = "butt";
     const visTiles = this.tiles.filter((t) => onScreen(t.bbox));
     // fills first, then strokes, then dots
-    for (const pass of ["fillPattern", "fillSolid", "stroke", "dot"] as const)
+    for (const pass of ["fillPattern", "fillSolid", "fillUnion", "stroke", "dot"] as const)
       for (const t of visTiles)
         for (const b of t.batches) {
           if (b.kind !== pass || this.hiddenLayers.has(b.layer) || b.maxSize * s < 0.75) continue;
           if (pass === "stroke") {
             ctx.strokeStyle = b.color;
             ctx.lineWidth = 1 / s;
+            // Dashes are in drawing units; a pattern finer than a few pixels reads as continuous, as in AutoCAD.
+            const pattern = b.dash === undefined ? undefined : d.dashes?.[b.dash];
+            const dashed = !!pattern && pattern.reduce((a, v) => a + v, 0) * s >= 3;
+            if (dashed) ctx.setLineDash(pattern!.map((v) => (v > 0 ? v : 1 / s)));
             ctx.stroke(b.path);
+            if (dashed) ctx.setLineDash([]);
           } else if (pass === "dot") {
             if (s < 0.5) continue; // dots are noise at overview scale
             ctx.fillStyle = b.color;
@@ -635,9 +664,9 @@ export class DrawingCanvas {
               ctx.fillRect(x - 0.75 / s, y - 0.75 / s, 1.5 / s, 1.5 / s);
             }
           } else {
-            ctx.globalAlpha = pass === "fillSolid" ? 0.85 : 0.16;
+            ctx.globalAlpha = pass === "fillPattern" ? 0.16 : 1;
             ctx.fillStyle = b.color;
-            ctx.fill(b.path, "evenodd");
+            ctx.fill(b.path, pass === "fillUnion" ? "nonzero" : "evenodd");
             ctx.globalAlpha = 1;
           }
         }
@@ -657,10 +686,13 @@ export class DrawingCanvas {
         ctx.save();
         ctx.translate(sx, sy);
         ctx.rotate(-p[7]);
-        if (p[11] !== 1) ctx.scale(p[11], 1);
+        ctx.font = fontFor(p[10], px);
+        // Fit the glyphs to the laid-out width, so a box AutoCAD filled is filled to the same edge.
+        const natural = p[12] > 0 ? ctx.measureText(p[9]).width : 0;
+        const stretch = natural > 0 ? (p[12] * s) / natural : p[11];
+        if (stretch !== 1 && Number.isFinite(stretch) && stretch > 0) ctx.scale(stretch, 1);
         if (px < TEXT_FULL_PX) ctx.globalAlpha = (px - TEXT_MIN_PX) / (TEXT_FULL_PX - TEXT_MIN_PX);
         ctx.fillStyle = this.selected.has(p[1]) ? theme.select : cssColor(p[3], theme);
-        ctx.font = `${(px * EM_PER_CAP[p[10]]).toFixed(1)}px ${FONT[p[10]]}`;
         ctx.textAlign = p[8][0] === "c" ? "center" : p[8][0] === "r" ? "right" : "left";
         ctx.textBaseline = "alphabetic";
         // top and middle refer to the capital height, as in AutoCAD
@@ -720,7 +752,7 @@ export class DrawingCanvas {
             addPrimToPath(fill, p);
             ctx.globalAlpha = 0.35;
             ctx.fillStyle = theme.select;
-            ctx.fill(fill, "evenodd");
+            ctx.fill(fill, p[4] === 2 ? "nonzero" : "evenodd");
             ctx.globalAlpha = 1;
           } else if (p[0] !== "t") addPrimToPath(path, p, 0.75 / s);
         }
@@ -801,6 +833,17 @@ function primBbox(p: Prim): [number, number, number, number] {
       }
       return [x0, y0, x1, y1];
     }
+    case "l": {
+      const f = p[4];
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (let i = 0; i < f.length; i += 2) {
+        if (f[i] < x0) x0 = f[i];
+        if (f[i] > x1) x1 = f[i];
+        if (f[i + 1] < y0) y0 = f[i + 1];
+        if (f[i + 1] > y1) y1 = f[i + 1];
+      }
+      return [x0, y0, x1, y1];
+    }
     case "f": {
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const f of p[5])
@@ -818,8 +861,7 @@ function primBbox(p: Prim): [number, number, number, number] {
     case "d":
       return [p[4], p[5], p[4], p[5]];
     case "t": {
-      const [, , , , x, y, h, rot, align, text, , wf] = p;
-      const w = CHAR_W * h * text.length * wf;
+      const [, , , , x, y, h, rot, align, , , , w] = p;
       const ox = align[0] === "c" ? -w / 2 : align[0] === "r" ? -w : 0;
       const oy = align[1] === "m" ? -h / 2 : align[1] === "t" ? -h : 0;
       const c = Math.cos(rot), s = Math.sin(rot);
@@ -840,6 +882,14 @@ function addPrimToPath(path: Path2D, p: Prim, pointRadius = 0.75) {
       path.moveTo(f[0], f[1]);
       for (let i = 2; i < f.length; i += 2) path.lineTo(f[i], f[i + 1]);
       if (p[4]) path.closePath();
+      break;
+    }
+    case "l": {
+      const f = p[4];
+      for (let i = 0; i + 3 < f.length; i += 4) {
+        path.moveTo(f[i], f[i + 1]);
+        path.lineTo(f[i + 2], f[i + 3]);
+      }
       break;
     }
     case "f":
@@ -897,8 +947,28 @@ function primDistance(p: Prim, x: number, y: number, b: Float64Array): number {
     }
     case "d":
       return Math.hypot(x - p[4], y - p[5]);
+    case "l": {
+      const f = p[4];
+      let best = Infinity;
+      for (let i = 0; i + 3 < f.length; i += 4) best = Math.min(best, segD(x, y, f[i], f[i + 1], f[i + 2], f[i + 3]));
+      return best;
+    }
+    case "f": {
+      // inside the filled area is a hit; otherwise the distance to its nearest edge
+      const loops = p[5];
+      let crossings = 0, winding = 0, best = Infinity;
+      for (const f of loops)
+        for (let i = 0, j = f.length - 2; i < f.length; j = i, i += 2) {
+          const [ax, ay, bx, by] = [f[j], f[j + 1], f[i], f[i + 1]];
+          best = Math.min(best, segD(x, y, ax, ay, bx, by));
+          if ((ay > y) !== (by > y) && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) {
+            crossings++;
+            winding += by > ay ? 1 : -1;
+          }
+        }
+      return (p[4] === 2 ? winding !== 0 : crossings % 2 === 1) ? 0 : best;
+    }
     case "t":
-    case "f":
       // inside the box counts as a hit
       return x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3] ? 0 : Math.hypot(Math.max(b[0] - x, 0, x - b[2]), Math.max(b[1] - y, 0, y - b[3]));
   }

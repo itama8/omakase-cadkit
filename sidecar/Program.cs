@@ -18,6 +18,7 @@ using System.Text.Json.Nodes;
 using ACadSharp;
 using ACadSharp.Entities;
 using ACadSharp.IO;
+using ACadSharp.Objects;
 using ACadSharp.Tables;
 using CSMath;
 
@@ -202,7 +203,7 @@ readonly record struct Affine(double A, double B, double C, double D, double E, 
 	public static Affine Ocs(XYZ normal) => normal.Z < 0 ? Scale(-1, 1) : Identity;
 }
 
-sealed class Payload
+sealed partial class Payload
 {
 	public sealed class Stats
 	{
@@ -214,10 +215,19 @@ sealed class Payload
 	readonly Dictionary<string, int> _layerIndex = new(StringComparer.OrdinalIgnoreCase);
 	readonly List<int> _layerRgb = new();
 	readonly Dictionary<string, int> _unrendered = new();
+	// Drawn, but not as the file specifies: substitute faces for SHX fonts, gradients in one colour.
+	readonly Dictionary<string, int> _approximated = new();
 	readonly Stats _stats = new();
 	readonly List<string> _emitErrorSamples = new();
-	// IMAGE placements in world space, top level and inside blocks, in draw order
-	readonly List<(int ent, string h, int layer, string file, double[] ins, double[] u, double[] v, double[] size, double fade, List<XY> clip)> _rasters = new();
+	readonly List<Layer> _layers = new();
+	// IMAGE placements in world space, top level and inside blocks, in draw order. src names an
+	// embedded picture in _images (OLE objects); file-based images leave it null.
+	readonly List<(int ent, string h, int layer, string file, double[] ins, double[] u, double[] v, double[] size, double fade, List<XY> clip, string src)> _rasters = new();
+	// Embedded pictures as data URLs, keyed by content hash so repeated logos are stored once.
+	readonly Dictionary<string, string> _images = new();
+	// Linetype dash patterns in world units, shared by index from stroke primitives.
+	readonly List<double[]> _dashes = new();
+	readonly Dictionary<string, int> _dashIndex = new();
 
 	// state for the top-level entity being emitted
 	int _ent;
@@ -263,7 +273,7 @@ sealed class Payload
 		var w = _w;
 		var h = _doc.Header;
 		w.WriteStartObject();
-		w.WriteNumber("schema", 7);
+		w.WriteNumber("schema", 8);
 		w.WriteStartObject("source");
 		w.WriteString("path", path);
 		w.WriteString("format", Path.GetExtension(path).TrimStart('.').ToLowerInvariant());
@@ -284,6 +294,7 @@ sealed class Payload
 		foreach (var l in _doc.Layers)
 		{
 			_layerIndex[l.Name] = _layerRgb.Count;
+			_layers.Add(l);
 			int rgb;
 			try { rgb = Rgb(l.Color.GetRgb()); } catch { rgb = 0xFFFFFF; }
 			_layerRgb.Add(rgb);
@@ -352,7 +363,7 @@ sealed class Payload
 			int layer = LayerIdx(e.Layer);
 			try
 			{
-				Emit(e, Affine.Identity, -1, ResolveColor(e, layer, _layerRgb[layer]));
+				Emit(e, Affine.Identity, -1, ResolveColor(e, layer, _layerRgb[layer]), null);
 			}
 			catch (Exception ex)
 			{
@@ -382,7 +393,21 @@ sealed class Payload
 				foreach (var cp in r.clip) { w.WriteStartArray(); w.WriteNumberValue(R(cp.X)); w.WriteNumberValue(R(cp.Y)); w.WriteEndArray(); }
 				w.WriteEndArray();
 			}
+			if (r.src != null) w.WriteString("src", r.src);
 			w.WriteEndObject();
+		}
+		w.WriteEndArray();
+
+		w.WriteStartObject("images");
+		foreach (var kv in _images) w.WriteString(kv.Key, kv.Value);
+		w.WriteEndObject();
+
+		w.WriteStartArray("dashes");
+		foreach (var d in _dashes)
+		{
+			w.WriteStartArray();
+			foreach (var v in d) w.WriteNumberValue(v);
+			w.WriteEndArray();
 		}
 		w.WriteEndArray();
 
@@ -395,6 +420,10 @@ sealed class Payload
 		foreach (var kv in _unrendered.OrderByDescending(k => k.Value)) w.WriteNumber(kv.Key, kv.Value);
 		w.WriteEndObject();
 		_stats.UnrenderedTotal = _unrendered.Values.Sum();
+
+		w.WriteStartObject("approximated");
+		foreach (var kv in _approximated.OrderByDescending(k => k.Value)) w.WriteNumber(kv.Key, kv.Value);
+		w.WriteEndObject();
 
 		w.WriteStartObject("notes");
 		foreach (var kv in notes.OrderByDescending(k => k.Value).Take(40)) w.WriteNumber(kv.Key, kv.Value);
@@ -559,43 +588,13 @@ sealed class Payload
 	static double X(IVector v) => v is XYZ a ? a.X : v is XY b ? b.X : v[0];
 	static double Y(IVector v) => v is XYZ a ? a.Y : v is XY b ? b.Y : v[1];
 
-	static string SafePlain(MText m, bool widen = false) => MTextPlain(m.Value ?? "", widen);
+	static string SafePlain(MText m) => MTextPlain(m.Value ?? "");
 
-	// TEXT control codes for display: %%u/%%o/%%k toggle under/overline and strike-through,
-	// %%d %%p %%c are degree, plus-minus and diameter, %%nnn is a character code.
-	static string TextPlain(string s)
-	{
-		if (string.IsNullOrEmpty(s) || !s.Contains("%%")) return s ?? "";
-		var sb = new StringBuilder(s.Length);
-		for (int i = 0; i < s.Length; i++)
-		{
-			if (s[i] != '%' || i + 2 >= s.Length || s[i + 1] != '%') { sb.Append(s[i]); continue; }
-			char k = char.ToLowerInvariant(s[i + 2]);
-			int n = 0, j = i + 2;
-			while (j < s.Length && j < i + 5 && char.IsAsciiDigit(s[j])) n = n * 10 + (s[j++] - '0');
-			if (j == i + 5) { sb.Append((char)n); i = j - 1; continue; }
-			switch (k)
-			{
-				case 'u': case 'o': case 'k': break;
-				case 'd': sb.Append('°'); break;
-				case 'p': sb.Append('±'); break;
-				case 'c': sb.Append('Ø'); break;
-				case '%': sb.Append('%'); break;
-				default: sb.Append("%%").Append(s[i + 2]); break;
-			}
-			i += 2;
-		}
-		return sb.ToString();
-	}
-
-	// MTEXT inline codes reduced to plain text. ACadSharp's PlainText leaves \W behind, and
-	// drafters indent with a widened space ({\W8.1; }TITLE), so with widen a space under a
-	// width factor is repeated to keep roughly its width on screen.
-	static string MTextPlain(string s, bool widen)
+	// MTEXT inline codes reduced to plain text for query and lint; one space stays one space.
+	// ACadSharp's PlainText leaves \W behind. Drawing goes through MTextRuns instead.
+	static string MTextPlain(string s)
 	{
 		var sb = new StringBuilder(s.Length);
-		var saved = new Stack<double>();
-		double width = 1;
 		string Arg(ref int i)
 		{
 			int end = s.IndexOf(';', i + 1);
@@ -604,14 +603,10 @@ sealed class Payload
 			i = end;
 			return a;
 		}
-		double pending = 0; // widened space not yet written, in plain spaces
 		for (int i = 0; i < s.Length; i++)
 		{
 			char c = s[i];
-			if (c == '{') { saved.Push(width); continue; }
-			if (c == '}') { if (saved.Count > 0) width = saved.Pop(); continue; }
-			if (c == ' ' && widen && width > 1) { pending += width; continue; }
-			if (pending > 0) { sb.Append(' ', (int)Math.Round(pending)); pending = 0; }
+			if (c == '{' || c == '}') continue;
 			if (c != '\\' || i + 1 >= s.Length) { sb.Append(c); continue; }
 			char k = s[++i];
 			switch (k)
@@ -620,12 +615,8 @@ sealed class Payload
 				case '~': sb.Append(' '); break;
 				case '\\': case '{': case '}': sb.Append(k); break;
 				case 'L': case 'l': case 'O': case 'o': case 'K': case 'k': case 'N': break;
-				case 'W':
-					if (double.TryParse(Arg(ref i), System.Globalization.NumberStyles.Float,
-						System.Globalization.CultureInfo.InvariantCulture, out var wf) && wf > 0) width = wf;
-					break;
 				case 'S': sb.Append(Arg(ref i).Replace('^', '/').Replace('#', '/')); break;
-				case 'A': case 'C': case 'c': case 'F': case 'f': case 'H': case 'Q': case 'T': case 'p':
+				case 'A': case 'C': case 'c': case 'F': case 'f': case 'H': case 'Q': case 'T': case 'p': case 'W':
 					Arg(ref i); break;
 				case 'U' when i + 5 < s.Length && s[i + 1] == '+'
 					&& int.TryParse(s.AsSpan(i + 2, 4), System.Globalization.NumberStyles.HexNumber, null, out var cp):
@@ -633,11 +624,18 @@ sealed class Payload
 				default: sb.Append('\\').Append(k); break;
 			}
 		}
-		if (pending > 0) sb.Append(' ', (int)Math.Round(pending));
 		return sb.ToString();
 	}
 
 	// ---------------------------------------------------------------- render primitives
+
+	// Dash pattern of the stroke being written (index into _dashes), or -1 for continuous.
+	int _lt = -1;
+	// Hatch pattern lines, exploded once per hatch in its own coordinates (blocks repeat them).
+	readonly Dictionary<Hatch, List<(double, double, double, double)>> _patterns = new();
+	// Pattern lines left to draw in this drawing; past it, hatches fall back to a tint.
+	int _patternBudget = 1_500_000;
+	const int PatternLimit = 60_000;
 
 	void Grow(double x, double y)
 	{
@@ -649,6 +647,16 @@ sealed class Payload
 	}
 
 	void Unrendered(string type) => _unrendered[type] = _unrendered.GetValueOrDefault(type) + 1;
+	void Approximated(string what) => _approximated[what] = _approximated.GetValueOrDefault(what) + 1;
+
+	// SHX stroke fonts are AutoCAD's own; text in them is drawn in a TrueType stand-in.
+	void NoteFont(ACadSharp.Tables.TextStyle st)
+	{
+		var file = st?.Filename ?? "";
+		if (file.Length == 0) return;
+		var ext = Path.GetExtension(file).ToLowerInvariant();
+		if (ext == ".shx" || ext == "") Approximated("text in SHX font " + Path.GetFileName(file).ToLowerInvariant() + " (drawn in a substitute face)");
+	}
 
 	void PrimHead(string kind, int layer, int rgb)
 	{
@@ -658,6 +666,13 @@ sealed class Payload
 		_w.WriteNumberValue(layer);
 		_w.WriteNumberValue(rgb);
 		_stats.Prims++;
+	}
+
+	// Strokes end with their dash pattern when they have one.
+	void PrimTail()
+	{
+		if (_lt >= 0) _w.WriteNumberValue(_lt);
+		_w.WriteEndArray();
 	}
 
 	void PrimPolyline(int layer, int rgb, bool closed, List<(double x, double y)> pts, Affine t)
@@ -674,15 +689,39 @@ sealed class Payload
 			_w.WriteNumberValue(Py(y));
 		}
 		_w.WriteEndArray();
+		PrimTail();
+	}
+
+	// Disjoint straight segments (hatch pattern lines): x0,y0,x1,y1 per segment.
+	void PrimSegments(int layer, int rgb, List<(double, double, double, double)> segs, Affine t)
+	{
+		if (segs.Count == 0) return;
+		PrimHead("l", layer, rgb);
+		_w.WriteStartArray();
+		foreach (var (ax, ay, bx, by) in segs)
+		{
+			var (x0, y0) = t.Apply(ax, ay);
+			var (x1, y1) = t.Apply(bx, by);
+			Grow(x0, y0);
+			Grow(x1, y1);
+			_w.WriteNumberValue(Px(x0));
+			_w.WriteNumberValue(Py(y0));
+			_w.WriteNumberValue(Px(x1));
+			_w.WriteNumberValue(Py(y1));
+		}
+		_w.WriteEndArray();
 		_w.WriteEndArray();
 	}
 
-	void PrimFill(int layer, int rgb, bool solid, List<List<(double x, double y)>> loops, Affine t)
+	// Fill modes: 0 a pattern hatch that could not be drawn (shown as a tint), 1 solid with
+	// even-odd islands, 2 solid union of overlapping pieces (nonzero, wide polylines), 3 an
+	// area used only for picking (its pattern or picture is drawn by other primitives).
+	void PrimFill(int layer, int rgb, int mode, List<List<(double x, double y)>> loops, Affine t)
 	{
 		loops = loops.Where(l => l.Count >= 3).ToList();
 		if (loops.Count == 0) return;
 		PrimHead("f", layer, rgb);
-		_w.WriteNumberValue(solid ? 1 : 0);
+		_w.WriteNumberValue(mode);
 		_w.WriteStartArray();
 		foreach (var loop in loops)
 		{
@@ -700,9 +739,10 @@ sealed class Payload
 		_w.WriteEndArray();
 	}
 
-	// align: horizontal l|c|r, vertical b|m|t (baseline is treated as bottom)
-	// serif: the style's font is a Times-like serif; wf: width factor (horizontal stretch)
-	void PrimText(int layer, int rgb, double x0, double y0, double height, double rot, string align, string text, Affine t, bool serif = false, double wf = 1)
+	// align: horizontal l|c|r, vertical b|m|t (baseline is treated as bottom). width is the
+	// laid-out advance in the text's own units (width factor included); the viewer fits the
+	// drawn glyphs to it.
+	void PrimText(int layer, int rgb, double x0, double y0, double height, double rot, string align, string text, Affine t, Face face, double wf, double width)
 	{
 		if (string.IsNullOrWhiteSpace(text) || !(height > 0)) return;
 		var (x, y) = t.Apply(x0, y0);
@@ -710,11 +750,12 @@ sealed class Payload
 		var (vx, vy) = t.ApplyVec(-Math.Sin(rot) * height, Math.Cos(rot) * height);
 		var h = Math.Sqrt(vx * vx + vy * vy);
 		var r = Math.Atan2(uy, ux);
+		var along = Math.Sqrt(ux * ux + uy * uy);
 		// a block scaled unevenly stretches its text like a width factor
-		wf = (wf > 0 ? wf : 1) * Math.Sqrt(ux * ux + uy * uy) * height / h;
+		wf = (wf > 0 ? wf : 1) * along * height / h;
 		if (!double.IsFinite(wf) || wf <= 0) wf = 1;
-		// approximate extents for the bbox and hit testing
-		var wdt = TextWidth(text, h, serif) * wf;
+		var wdt = width * along;
+		if (!double.IsFinite(wdt) || wdt <= 0) wdt = TextWidth(text, h, face) * wf;
 		double ox = align[0] == 'c' ? -wdt / 2 : align[0] == 'r' ? -wdt : 0;
 		double oy = align[1] == 'm' ? -h / 2 : align[1] == 't' ? -h : 0;
 		double cs = Math.Cos(r), sn = Math.Sin(r);
@@ -727,28 +768,13 @@ sealed class Payload
 		_w.WriteNumberValue(Math.Round(r, 5));
 		_w.WriteStringValue(align);
 		_w.WriteStringValue(text);
-		_w.WriteStringValue(serif ? "serif" : "sans");
+		_w.WriteStringValue(face.Code);
 		_w.WriteNumberValue(Math.Round(wf, 4));
+		_w.WriteNumberValue(Sig(wdt));
 		_w.WriteEndArray();
 	}
 
-	// Times-like faces are drawn with a metric-compatible serif; everything else (Arial, SHX
-	// stroke fonts) with the sans fallback.
-	static bool IsSerif(TextStyle st)
-	{
-		var f = ((st?.Filename ?? "") + "|" + (st?.Name ?? "")).ToLowerInvariant();
-		return !f.Contains("sans") && (f.Contains("times") || f.Contains("georgia") || f.Contains("garamond")
-			|| f.Contains("cambria") || f.Contains("palatino") || f.Contains("bookman") || f.Contains("book antiqua")
-			|| f.Contains("century"));
-	}
-
-	// Narrow faces (Arial Narrow, ARIALN.TTF, condensed) are drawn as the regular face squeezed:
-	// Arial Narrow's advances are 82% of Arial's.
-	static double FaceWidth(TextStyle st)
-	{
-		var f = ((st?.Filename ?? "") + "|" + (st?.Name ?? "")).ToLowerInvariant();
-		return f.Contains("narrow") || f.Contains("condensed") || f.Contains("arialn") ? 0.82 : 1;
-	}
+	static double Sig(double v) => v == 0 || !double.IsFinite(v) ? 0 : Math.Round(v, Math.Clamp(5 - (int)Math.Floor(Math.Log10(Math.Abs(v))), 0, 12));
 
 	void PrimDot(int layer, int rgb, double x0, double y0, Affine t)
 	{
@@ -785,7 +811,7 @@ sealed class Payload
 			_w.WriteNumberValue(Px(wx));
 			_w.WriteNumberValue(Py(wy));
 			_w.WriteNumberValue(Math.Round(wr, 4));
-			_w.WriteEndArray();
+			PrimTail();
 			return;
 		}
 		var (sx, sy) = t.Apply(cx + r * Math.Cos(a0.Value), cy + r * Math.Sin(a0.Value));
@@ -799,11 +825,11 @@ sealed class Payload
 		_w.WriteNumberValue(Math.Round(wr, 4));
 		_w.WriteNumberValue(Math.Round(s0, 5));
 		_w.WriteNumberValue(Math.Round(s1, 5));
-		_w.WriteEndArray();
+		PrimTail();
 	}
 
-	// Tessellate vertices with bulges into points.
-	static List<(double x, double y)> Tess(List<(double x, double y, double bulge)> v, bool closed)
+	// Tessellate vertices with bulges into points; step is the largest angle per arc piece.
+	static List<(double x, double y)> Tess(List<(double x, double y, double bulge)> v, bool closed, double step = Math.PI / 18)
 	{
 		var pts = new List<(double, double)>();
 		int n = v.Count;
@@ -825,7 +851,7 @@ sealed class Payload
 					double cx = mx - dy / c * d, cy = my + dx / c * d;
 					double r = Math.Sqrt((a.x - cx) * (a.x - cx) + (a.y - cy) * (a.y - cy));
 					double a0 = Math.Atan2(a.y - cy, a.x - cx);
-					int k = Math.Clamp((int)Math.Ceiling(Math.Abs(theta) / (Math.PI / 18)), 2, 64);
+					int k = Math.Clamp((int)Math.Ceiling(Math.Abs(theta) / step), 2, 128);
 					for (int j = 1; j < k; j++)
 					{
 						double ang = a0 + theta * j / k;
@@ -861,9 +887,81 @@ sealed class Payload
 
 	static List<(double x, double y)> Xy(IEnumerable<XYZ> pts) => pts.Select(p => (p.X, p.Y)).ToList();
 
-	// Emit primitives for one entity under transform t.
-	// inheritLayer: the insert's layer for block content (-1 at top level); blockRgb: ByBlock colour.
-	void Emit(Entity e, Affine t, int inheritLayer, int blockRgb)
+	static List<(double x, double y)> Ccw(List<(double x, double y)> loop)
+	{
+		double a = 0;
+		for (int i = 0, j = loop.Count - 1; i < loop.Count; j = i++) a += loop[j].x * loop[i].y - loop[i].x * loop[j].y;
+		if (a < 0) loop.Reverse();
+		return loop;
+	}
+
+	// ---------------------------------------------------------------- linetypes
+
+	// The linetype an entity draws with: ByLayer takes its (effective) layer's, ByBlock the insert's.
+	LineType ResolveLt(Entity e, int layer, LineType blockLt)
+	{
+		var lt = e.LineType;
+		var name = lt?.Name ?? "ByLayer";
+		if (name.Equals("ByLayer", StringComparison.OrdinalIgnoreCase)) return layer >= 0 && layer < _layers.Count ? _layers[layer].LineType : null;
+		if (name.Equals("ByBlock", StringComparison.OrdinalIgnoreCase)) return blockLt;
+		return lt;
+	}
+
+	/// <summary>
+	/// Dash pattern of a stroke in world units: dash, gap, dash, gap ... starting with a dash; 0 is a
+	/// dot. Shapes and text embedded in complex linetypes keep their spacing but are not drawn.
+	/// Returns -1 for continuous lines.
+	/// </summary>
+	int DashFor(Entity e, int layer, LineType blockLt, Affine t)
+	{
+		var lt = ResolveLt(e, layer, blockLt);
+		if (lt == null || lt.Segments == null || !lt.Segments.Any()) return -1;
+		if (lt.Segments.Any(sg => sg.IsShape || sg.IsText))
+			Approximated("complex linetype " + lt.Name + " (embedded text/shapes omitted)");
+		double scale = (_doc.Header.LineTypeScale > 0 ? _doc.Header.LineTypeScale : 1)
+			* (e.LineTypeScale > 0 ? e.LineTypeScale : 1)
+			* Math.Sqrt(Math.Abs(t.A * t.D - t.B * t.C));
+		if (!(scale > 0) || !double.IsFinite(scale)) return -1;
+		var parts = new List<(bool on, double len)>();
+		foreach (var sg in lt.Segments)
+		{
+			bool on = sg.Length >= 0;
+			double len = Math.Abs(sg.Length) * scale;
+			if (parts.Count > 0 && parts[^1].on == on) parts[^1] = (on, parts[^1].len + len);
+			else parts.Add((on, len));
+		}
+		if (!parts.Any(p => !p.on && p.len > 0) || !parts.Any(p => p.on)) return -1;
+		// canvas and SVG dash arrays start with a dash
+		if (!parts[0].on) { parts.Add(parts[0]); parts.RemoveAt(0); }
+		var merged = new List<(bool on, double len)>();
+		foreach (var p in parts)
+			if (merged.Count > 0 && merged[^1].on == p.on) merged[^1] = (p.on, merged[^1].len + p.len);
+			else merged.Add(p);
+		if (merged.Count % 2 == 1) { merged[0] = (true, merged[0].len + merged[^1].len); merged.RemoveAt(merged.Count - 1); }
+		var dash = merged.Select(p => Sig(p.len)).ToArray();
+		var key = string.Join(",", dash.Select(v => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
+		if (!_dashIndex.TryGetValue(key, out var idx))
+		{
+			idx = _dashes.Count;
+			_dashes.Add(dash);
+			_dashIndex[key] = idx;
+		}
+		return idx;
+	}
+
+	// ---------------------------------------------------------------- entities
+
+	int ColorOf(ACadSharp.Color c, int layer, int blockRgb)
+	{
+		if (c.IsByLayer) return _layerRgb[layer];
+		if (c.IsByBlock) return blockRgb;
+		try { return Rgb(c.GetRgb()); } catch { return blockRgb; }
+	}
+
+	// Emit primitives for one entity under transform t. inheritLayer: the insert's layer for
+	// block content (-1 at top level); blockRgb and blockLt: the insert's colour and linetype
+	// for ByBlock content.
+	void Emit(Entity e, Affine t, int inheritLayer, int blockRgb, LineType blockLt)
 	{
 		if (_depth > 16) return; // runaway nesting guard
 		int layer = EffectiveLayer(e, inheritLayer);
@@ -873,24 +971,49 @@ sealed class Payload
 		switch (e)
 		{
 			case Line l:
+				_lt = DashFor(e, layer, blockLt, t);
 				PrimPolyline(layer, rgb, false, new() { (l.StartPoint.X, l.StartPoint.Y), (l.EndPoint.X, l.EndPoint.Y) }, t);
 				break;
 			case LwPolyline p:
-				PrimPolyline(layer, rgb, p.IsClosed, Tess(p.Vertices.Select(v => (v.Location.X, v.Location.Y, v.Bulge)).ToList(), p.IsClosed), t.Then(Affine.Ocs(p.Normal)));
-				break;
+				{
+					var o = t.Then(Affine.Ocs(p.Normal));
+					var v = p.Vertices.Select(x => (x.Location.X, x.Location.Y, x.Bulge,
+						p.ConstantWidth > 0 ? p.ConstantWidth : x.StartWidth, p.ConstantWidth > 0 ? p.ConstantWidth : x.EndWidth)).ToList();
+					if (EmitWide(layer, rgb, v, p.IsClosed, o)) break;
+					_lt = DashFor(e, layer, blockLt, o);
+					PrimPolyline(layer, rgb, p.IsClosed, Tess(v.Select(x => (x.Item1, x.Item2, x.Item3)).ToList(), p.IsClosed), o);
+					break;
+				}
 			case IPolyline p2:
-				PrimPolyline(layer, rgb, p2.IsClosed, Tess(p2.Vertices.Select(v => (X(v.Location), Y(v.Location), v.Bulge)).ToList(), p2.IsClosed), t);
-				break;
+				{
+					double w0 = 0, w1 = 0;
+					if (p2 is Polyline2D pl) (w0, w1) = (pl.StartWidth, pl.EndWidth);
+					var v = p2.Vertices.Select(x =>
+					{
+						var vx = x as Vertex;
+						double sw = vx?.StartWidth ?? 0, ew = vx?.EndWidth ?? 0;
+						if (sw == 0 && ew == 0) (sw, ew) = (w0, w1);
+						return (X(x.Location), Y(x.Location), x.Bulge, sw, ew);
+					}).ToList();
+					if (EmitWide(layer, rgb, v, p2.IsClosed, t)) break;
+					_lt = DashFor(e, layer, blockLt, t);
+					PrimPolyline(layer, rgb, p2.IsClosed, Tess(v.Select(x => (x.Item1, x.Item2, x.Item3)).ToList(), p2.IsClosed), t);
+					break;
+				}
 			case Arc a:
+				_lt = DashFor(e, layer, blockLt, t);
 				PrimArc(layer, rgb, a.Center.X, a.Center.Y, a.Radius, a.StartAngle, a.EndAngle, t.Then(Affine.Ocs(a.Normal)));
 				break;
 			case Circle c:
+				_lt = DashFor(e, layer, blockLt, t);
 				PrimArc(layer, rgb, c.Center.X, c.Center.Y, c.Radius, null, null, t.Then(Affine.Ocs(c.Normal)));
 				break;
 			case Ellipse el:
+				_lt = DashFor(e, layer, blockLt, t);
 				PrimPolyline(layer, rgb, false, Xy(el.PolygonalVertexes(72)), t);
 				break;
 			case Spline sp:
+				_lt = DashFor(e, layer, blockLt, t);
 				if (sp.TryPolygonalVertexes(64, out var spts)) PrimPolyline(layer, rgb, false, Xy(spts), t);
 				else Unrendered("SPLINE");
 				break;
@@ -898,68 +1021,46 @@ sealed class Payload
 				PrimDot(layer, rgb, pt.Location.X, pt.Location.Y, t);
 				break;
 			case Solid so:
-				PrimFill(layer, rgb, true, new() { new() { (so.FirstCorner.X, so.FirstCorner.Y), (so.SecondCorner.X, so.SecondCorner.Y), (so.FourthCorner.X, so.FourthCorner.Y), (so.ThirdCorner.X, so.ThirdCorner.Y) } }, t.Then(Affine.Ocs(so.Normal)));
+				PrimFill(layer, rgb, 1, new() { new() { (so.FirstCorner.X, so.FirstCorner.Y), (so.SecondCorner.X, so.SecondCorner.Y), (so.FourthCorner.X, so.FourthCorner.Y), (so.ThirdCorner.X, so.ThirdCorner.Y) } }, t.Then(Affine.Ocs(so.Normal)));
 				break;
 			case Hatch ht:
-				{
-					var loops = new List<List<(double, double)>>();
-					foreach (var path in ht.Paths)
-					{
-						// Text-box paths are annotation metadata, not geometric fill
-						// boundaries. In particular they must not cut through a frame.
-						if ((path.Flags & (BoundaryPathFlags.Textbox | BoundaryPathFlags.TextIsland)) != 0) continue;
-						var loop = new List<(double, double)>();
-						foreach (var edge in path.Edges)
-						{
-							Entity ee;
-							try { ee = edge.ToEntity(); } catch { continue; }
-							loop.AddRange(EdgePoints(ee));
-						}
-						if (loop.Count < 3) continue;
-						loops.Add(loop);
-					}
-					PrimFill(layer, rgb, ht.IsSolid, loops, t.Then(Affine.Ocs(ht.Normal)));
-					break;
-				}
+				EmitHatch(ht, layer, rgb, t);
+				break;
 			case AttributeDefinition:
 				break; // definitions are templates; the insert's attributes carry the values
 			case TextEntity tx:
-				{
-					var useAlign = tx.HorizontalAlignment != TextHorizontalAlignment.Left || tx.VerticalAlignment != TextVerticalAlignmentType.Baseline;
-					var p = useAlign ? tx.AlignmentPoint : tx.InsertPoint;
-					char ha = tx.HorizontalAlignment switch
-					{
-						TextHorizontalAlignment.Center or TextHorizontalAlignment.Middle or TextHorizontalAlignment.Aligned or TextHorizontalAlignment.Fit => 'c',
-						TextHorizontalAlignment.Right => 'r',
-						_ => 'l',
-					};
-					if (tx.HorizontalAlignment == TextHorizontalAlignment.Middle) { PrimText(layer, rgb, p.X, p.Y, tx.Height, tx.Rotation, "cm", TextPlain(tx.Value), t.Then(Affine.Ocs(tx.Normal)), IsSerif(tx.Style), tx.WidthFactor * FaceWidth(tx.Style)); break; }
-					char va = tx.VerticalAlignment switch
-					{
-						TextVerticalAlignmentType.Middle => 'm',
-						TextVerticalAlignmentType.Top => 't',
-						_ => 'b',
-					};
-					PrimText(layer, rgb, p.X, p.Y, tx.Height, tx.Rotation, $"{ha}{va}", TextPlain(tx.Value), t.Then(Affine.Ocs(tx.Normal)), IsSerif(tx.Style), tx.WidthFactor * FaceWidth(tx.Style));
-					break;
-				}
+				EmitText(tx, layer, rgb, t);
+				break;
 			case MText m:
 				EmitMText(m, layer, rgb, t);
 				break;
 			case Insert ins:
-				EmitInsert(ins, t, layer, rgb);
+				EmitInsert(ins, t, layer, rgb, ResolveLt(ins, layer, blockLt));
 				break;
 			case Dimension d:
 				if (d.Block != null)
 				{
 					_depth++;
-					foreach (var be in d.Block.Entities) Emit(be, t, layer, rgb);
+					var dlt = ResolveLt(d, layer, blockLt);
+					foreach (var be in d.Block.Entities) Emit(be, t, layer, rgb, dlt);
 					_depth--;
 				}
 				else Unrendered("DIMENSION");
 				break;
 			case Leader ld:
-				PrimPolyline(layer, rgb, false, Xy(ld.Vertices), t);
+				{
+					var pts = Xy(ld.Vertices);
+					PrimPolyline(layer, rgb, false, pts, t);
+					if (ld.ArrowHeadEnabled && pts.Count >= 2)
+					{
+						var ds = ld.Style;
+						double size = (ds?.ArrowSize > 0 ? ds.ArrowSize : 0.18) * (ds?.ScaleFactor > 0 ? ds.ScaleFactor : 1);
+						EmitArrow(layer, rgb, pts[0], pts[1], size, ds?.LeaderArrow, t);
+					}
+					break;
+				}
+			case MultiLeader ml:
+				EmitMLeader(ml, t, layer, rgb);
 				break;
 			case RasterImage img:
 				{
@@ -974,22 +1075,18 @@ sealed class Payload
 						var (ux, uy) = t.ApplyVec(img.UVector.X, img.UVector.Y);
 						var (vx, vy) = t.ApplyVec(img.VVector.X, img.VVector.Y);
 						var clip = img.ClippingState && img.ClipBoundaryVertices?.Count >= 2 ? img.ClipBoundaryVertices.ToList() : null;
-						_rasters.Add((_ent, img.Handle.ToString("X"), layer, file, new[] { wx, wy }, new[] { ux, uy }, new[] { vx, vy }, new[] { img.Size.X, img.Size.Y }, img.Fade, clip));
+						_rasters.Add((_ent, img.Handle.ToString("X"), layer, file, new[] { wx, wy }, new[] { ux, uy }, new[] { vx, vy }, new[] { img.Size.X, img.Size.Y }, img.Fade, clip, null));
 					}
 					break;
 				}
 			case Ole2Frame ole:
-				{
-					var a = ole.UpperLeftCorner;
-					var b = ole.LowerRightCorner;
-					PrimPolyline(layer, rgb, true, new() { (a.X, a.Y), (b.X, a.Y), (b.X, b.Y), (a.X, b.Y) }, t);
-					Unrendered("OLE2FRAME (frame only)");
-					break;
-				}
+				EmitOle(ole, layer, rgb, t);
+				break;
 			default:
 				Unrendered(e.ObjectName);
 				break;
 		}
+		_lt = -1;
 	}
 
 	IEnumerable<(double, double)> EdgePoints(Entity ee) => ee switch
@@ -1004,88 +1101,275 @@ sealed class Payload
 		_ => Enumerable.Empty<(double, double)>(),
 	};
 
-	void EmitMText(MText m, int layer, int rgb, Affine t)
+	/// <summary>
+	/// A polyline with width is drawn as AutoCAD draws it: a filled band, not a centre line.
+	/// Each piece is a quad with its start and end width; outer corners get a mitred wedge.
+	/// All pieces wind the same way so a nonzero fill unions them without gaps.
+	/// </summary>
+	bool EmitWide(int layer, int rgb, List<(double x, double y, double bulge, double w0, double w1)> v, bool closed, Affine t)
 	{
-		var text = SafePlain(m, widen: true);
-		if (string.IsNullOrWhiteSpace(text)) return;
-		double h = m.Height;
-		bool serif = IsSerif(m.Style);
-		double face = FaceWidth(m.Style);
-		// AutoCAD wraps each paragraph to the MTEXT box width (group 41)
-		var lines = text.Replace("\r\n", "\n").Split('\n')
-			.SelectMany(p => m.RectangleWidth > 0 ? Wrap(p, h, m.RectangleWidth / face, serif) : new[] { p }).ToArray();
-		double rot = Math.Atan2(m.AlignmentPoint.Y, m.AlignmentPoint.X);
-		double step = h * 1.6667 * (m.LineSpacing > 0 ? m.LineSpacing : 1);
-		var ap = m.AttachmentPoint.ToString(); // TopLeft, MiddleCenter, BottomRight, ...
-		char ha = ap.EndsWith("Center") ? 'c' : ap.EndsWith("Right") ? 'r' : 'l';
-		double total = step * (lines.Length - 1);
-		// offset of the first line's top from the insert point, along the text's up axis
-		double firstTop = ap.StartsWith("Top") ? 0 : ap.StartsWith("Middle") ? (total + h) / 2 : total + h;
-		var o = t.Then(Affine.Ocs(m.Normal));
-		for (int i = 0; i < lines.Length; i++)
+		int n = v.Count;
+		if (n < 2 || !v.Any(p => p.w0 > 0 || p.w1 > 0)) return false;
+		int segs = closed ? n : n - 1;
+		var subs = new List<(double ax, double ay, double bx, double by, double wa, double wb)>();
+		for (int i = 0; i < segs; i++)
 		{
-			double up = firstTop - i * step; // distance of this line's top above the insert point
-			double ox = -Math.Sin(rot) * up, oy = Math.Cos(rot) * up;
-			PrimText(layer, rgb, m.InsertPoint.X + ox, m.InsertPoint.Y + oy, h, rot, ha + "t", lines[i], o, serif, face);
-		}
-	}
-
-	// Advance widths, 1/1000 em, for ' '..'~', read from Liberation Sans and Liberation Serif
-	// (metric-compatible with Arial and Times New Roman, the viewer's fallback faces).
-	static readonly short[] SansWidths = {
-		278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
-		556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
-		1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
-		667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
-		333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
-		556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
-	};
-	static readonly short[] SerifWidths = {
-		250, 333, 408, 500, 500, 833, 778, 180, 333, 333, 500, 564, 250, 333, 250, 278,
-		500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 278, 278, 564, 564, 564, 444,
-		921, 722, 667, 667, 722, 611, 556, 722, 722, 333, 389, 722, 611, 889, 722, 722,
-		556, 722, 667, 556, 611, 722, 722, 944, 722, 722, 611, 333, 278, 333, 469, 500,
-		333, 444, 500, 444, 500, 444, 333, 500, 500, 278, 278, 500, 278, 778, 500, 500,
-		500, 500, 333, 389, 278, 500, 500, 722, 500, 500, 444, 480, 200, 480, 541,
-	};
-	// em per capital height: Arial's cap is 0.716 em; Times measured against an AutoCAD plot
-	// (D1.1 title: h 26.81 drawn with a 39.5-unit em).
-	const double SansEmPerCap = 1 / 0.72, SerifEmPerCap = 1.47;
-
-	// Width of text drawn at capital height h, as the viewer draws it.
-	static double TextWidth(string s, double h, bool serif)
-	{
-		var tab = serif ? SerifWidths : SansWidths;
-		double u = 0;
-		foreach (var c in s) u += c >= ' ' && c <= '~' ? tab[c - ' '] : 556;
-		return u / 1000 * h * (serif ? SerifEmPerCap : SansEmPerCap);
-	}
-
-	// Greedy word wrap of one paragraph to width; leading spaces (indents) stay on the first line.
-	static IEnumerable<string> Wrap(string para, double h, double width, bool serif)
-	{
-		if (TextWidth(para, h, serif) <= width) { yield return para; yield break; }
-		var line = new StringBuilder();
-		int i = 0;
-		while (i < para.Length)
-		{
-			int ws = i;
-			while (i < para.Length && para[i] == ' ') i++;
-			int we = i;
-			while (i < para.Length && para[i] != ' ') i++;
-			if (we == i) break; // trailing spaces
-			var word = para.Substring(we, i - we);
-			if (line.Length > 0 && TextWidth(line + para.Substring(ws, i - ws), h, serif) > width)
+			var a = v[i];
+			var b = v[(i + 1) % n];
+			var p = Tess(new() { (a.x, a.y, a.bulge), (b.x, b.y, 0) }, false, Math.PI / 36);
+			double total = PolyLength(p), acc = 0;
+			for (int j = 0; j + 1 < p.Count; j++)
 			{
-				yield return line.ToString();
-				line.Clear().Append(word);
+				double sl = Math.Sqrt(Math.Pow(p[j + 1].x - p[j].x, 2) + Math.Pow(p[j + 1].y - p[j].y, 2));
+				if (!(sl > 0)) continue;
+				double fa = total > 0 ? acc / total : 0;
+				acc += sl;
+				double fb = total > 0 ? acc / total : 1;
+				subs.Add((p[j].x, p[j].y, p[j + 1].x, p[j + 1].y, a.w0 + (a.w1 - a.w0) * fa, a.w0 + (a.w1 - a.w0) * fb));
 			}
-			else line.Append(para, ws, i - ws);
 		}
-		if (line.Length > 0) yield return line.ToString();
+		if (subs.Count == 0) return false;
+		var loops = new List<List<(double x, double y)>>();
+		foreach (var s in subs)
+		{
+			if (!(s.wa > 0) && !(s.wb > 0)) continue;
+			double dx = s.bx - s.ax, dy = s.by - s.ay, len = Math.Sqrt(dx * dx + dy * dy);
+			double nx = -dy / len, ny = dx / len;
+			loops.Add(Ccw(new()
+			{
+				(s.ax + nx * s.wa / 2, s.ay + ny * s.wa / 2), (s.bx + nx * s.wb / 2, s.by + ny * s.wb / 2),
+				(s.bx - nx * s.wb / 2, s.by - ny * s.wb / 2), (s.ax - nx * s.wa / 2, s.ay - ny * s.wa / 2),
+			}));
+		}
+		int joints = closed ? subs.Count : subs.Count - 1;
+		for (int k = 0; k < joints; k++)
+		{
+			var A = subs[k];
+			var B = subs[(k + 1) % subs.Count];
+			double wA = A.wb, wB = B.wa;
+			if (!(wA > 0) && !(wB > 0)) continue;
+			if (Math.Abs(A.bx - B.ax) + Math.Abs(A.by - B.ay) > 1e-9 * (1 + Math.Abs(A.bx) + Math.Abs(A.by))) continue;
+			double lA = Math.Sqrt(Math.Pow(A.bx - A.ax, 2) + Math.Pow(A.by - A.ay, 2)), lB = Math.Sqrt(Math.Pow(B.bx - B.ax, 2) + Math.Pow(B.by - B.ay, 2));
+			double dax = (A.bx - A.ax) / lA, day = (A.by - A.ay) / lA, dbx = (B.bx - B.ax) / lB, dby = (B.by - B.ay) / lB;
+			double cross = dax * dby - day * dbx;
+			if (Math.Abs(cross) < 1e-9) continue;
+			double side = cross > 0 ? -1 : 1; // the outer side of the turn
+			double px = A.bx, py = A.by;
+			var pa = (x: px - side * day * wA / 2, y: py + side * dax * wA / 2);
+			var pb = (x: px - side * dby * wB / 2, y: py + side * dbx * wB / 2);
+			double s = ((pb.x - pa.x) * dby - (pb.y - pa.y) * dbx) / cross;
+			var m = (x: pa.x + s * dax, y: pa.y + s * day);
+			bool miter = Math.Abs(wA - wB) < 1e-9 * (1 + wA) && Math.Sqrt(Math.Pow(m.x - px, 2) + Math.Pow(m.y - py, 2)) <= 2 * wA;
+			loops.Add(Ccw(miter ? new() { (px, py), pa, m, pb } : new() { (px, py), pa, pb }));
+		}
+		PrimFill(layer, rgb, 2, loops, t);
+		return true;
 	}
 
-	void EmitInsert(Insert ins, Affine t, int layer, int rgb)
+	void EmitHatch(Hatch ht, int layer, int rgb, Affine t)
+	{
+		var loops = new List<List<(double, double)>>();
+		foreach (var path in ht.Paths)
+		{
+			// Text-box paths are annotation metadata, not geometric fill
+			// boundaries. In particular they must not cut through a frame.
+			if ((path.Flags & (BoundaryPathFlags.Textbox | BoundaryPathFlags.TextIsland)) != 0) continue;
+			var loop = new List<(double, double)>();
+			foreach (var edge in path.Edges)
+			{
+				Entity ee;
+				try { ee = edge.ToEntity(); } catch { continue; }
+				loop.AddRange(EdgePoints(ee));
+			}
+			if (loop.Count < 3) continue;
+			loops.Add(loop);
+		}
+		var o = t.Then(Affine.Ocs(ht.Normal));
+		bool gradient = ht.GradientColor?.Enabled == true;
+		if (ht.IsSolid || gradient)
+		{
+			PrimFill(layer, rgb, 1, loops, o);
+			if (gradient) Approximated("HATCH gradient (drawn in one colour)");
+			return;
+		}
+		var segs = PatternLines(ht);
+		if (segs == null)
+		{
+			PrimFill(layer, rgb, 0, loops, o);
+			Unrendered("HATCH pattern (too dense, drawn as a tint)");
+			return;
+		}
+		PrimFill(layer, rgb, 3, loops, o);
+		PrimSegments(layer, rgb, segs, o);
+	}
+
+	/// <summary>
+	/// Pattern lines clipped to the hatch boundary, with each pattern line's dashes applied.
+	/// Null when the pattern is too dense to draw line by line.
+	/// </summary>
+	List<(double, double, double, double)> PatternLines(Hatch ht)
+	{
+		if (_patterns.TryGetValue(ht, out var cached)) return cached;
+		List<(double, double, double, double)> result = null;
+		try
+		{
+			var lines = ht.Pattern?.Lines;
+			if (lines != null && lines.Count > 0)
+			{
+				var bb = ht.GetBoundingBox();
+				double diag = Math.Sqrt(Math.Pow(bb.Max.X - bb.Min.X, 2) + Math.Pow(bb.Max.Y - bb.Min.Y, 2));
+				double estimate = 0;
+				foreach (var pl in lines)
+				{
+					double perp = Math.Abs(-Math.Sin(pl.Angle) * pl.Offset.X + Math.Cos(pl.Angle) * pl.Offset.Y);
+					estimate += perp > 0 ? diag / perp : double.PositiveInfinity;
+				}
+				if (estimate <= PatternLimit && estimate <= _patternBudget)
+				{
+					result = new();
+					foreach (var seg in ht.ExplodePattern())
+					{
+						if (seg is not Line l) continue;
+						Dash(result, l.StartPoint.X, l.StartPoint.Y, l.EndPoint.X, l.EndPoint.Y, lines);
+						if (result.Count > PatternLimit || result.Count > _patternBudget) { result = null; break; }
+					}
+					if (result != null) _patternBudget -= result.Count;
+				}
+			}
+		}
+		catch { result = null; }
+		_patterns[ht] = result;
+		return result;
+	}
+
+	// Splits one pattern line into its dashes. Rows of a family repeat at Offset from BasePoint,
+	// so a point's phase along the family is its distance from the row's own base point.
+	static void Dash(List<(double, double, double, double)> into, double ax, double ay, double bx, double by, List<HatchPattern.Line> family)
+	{
+		double ang = Math.Atan2(by - ay, bx - ax);
+		HatchPattern.Line pl = null;
+		bool reversed = false;
+		foreach (var f in family)
+		{
+			double d = Math.IEEERemainder(ang - f.Angle, 2 * Math.PI);
+			if (Math.Abs(d) < 1e-6) { pl = f; break; }
+			if (Math.Abs(Math.Abs(d) - Math.PI) < 1e-6) { pl = f; reversed = true; break; }
+		}
+		if (pl == null || pl.DashLengths == null || pl.DashLengths.Count == 0) { into.Add((ax, ay, bx, by)); return; }
+		if (reversed) (ax, ay, bx, by) = (bx, by, ax, ay);
+		double ux = Math.Cos(pl.Angle), uy = Math.Sin(pl.Angle), nx = -uy, ny = ux;
+		double period = pl.DashLengths.Sum(Math.Abs);
+		if (!(period > 0)) { into.Add((ax, ay, bx, by)); return; }
+		double rowStep = pl.Offset.X * nx + pl.Offset.Y * ny;
+		double row = Math.Abs(rowStep) > 0 ? Math.Round(((ax - pl.BasePoint.X) * nx + (ay - pl.BasePoint.Y) * ny) / rowStep) : 0;
+		double baseX = pl.BasePoint.X + row * pl.Offset.X, baseY = pl.BasePoint.Y + row * pl.Offset.Y;
+		double t0 = (ax - baseX) * ux + (ay - baseY) * uy, t1 = (bx - baseX) * ux + (by - baseY) * uy;
+		double start = Math.Floor(t0 / period) * period;
+		for (double p = start; p < t1; p += period)
+		{
+			if (into.Count > PatternLimit) return;
+			double at = p;
+			foreach (var dl in pl.DashLengths)
+			{
+				double len = Math.Abs(dl);
+				if (dl >= 0)
+				{
+					double s = Math.Max(at, t0), e = Math.Min(at + len, t1);
+					if (dl == 0 && at >= t0 && at <= t1) { s = at; e = at + period * 1e-3; }
+					if (e > s) into.Add((baseX + ux * s, baseY + uy * s, baseX + ux * e, baseY + uy * e));
+				}
+				at += len;
+			}
+		}
+	}
+
+	/// <summary>
+	/// An arrowhead with its tip at tip, pointing away from from. A named arrow block is placed
+	/// like AutoCAD's: its +X axis along the arrow, scaled by size. Otherwise a closed filled arrow.
+	/// </summary>
+	void EmitArrow(int layer, int rgb, (double x, double y) tip, (double x, double y) from, double size, BlockRecord block, Affine t)
+	{
+		double dx = tip.x - from.x, dy = tip.y - from.y, len = Math.Sqrt(dx * dx + dy * dy);
+		if (!(len > 0) || !(size > 0)) return;
+		double ux = dx / len, uy = dy / len;
+		if (block != null)
+		{
+			if (block.Name.Equals("_None", StringComparison.OrdinalIgnoreCase)) return;
+			if (block.Entities.Any())
+			{
+				var bp = block.BlockEntity?.BasePoint ?? XYZ.Zero;
+				var local = Affine.Translate(tip.x, tip.y).Then(Affine.Rotate(Math.Atan2(uy, ux))).Then(Affine.Scale(size, size)).Then(Affine.Translate(-bp.X, -bp.Y));
+				_depth++;
+				foreach (var be in block.Entities) Emit(be, t.Then(local), layer, rgb, null);
+				_depth--;
+				return;
+			}
+		}
+		double tx = tip.x - ux * size, ty = tip.y - uy * size, hw = size / 6;
+		PrimFill(layer, rgb, 1, new() { new() { tip, (tx - uy * hw, ty + ux * hw), (tx + uy * hw, ty - ux * hw) } }, t);
+	}
+
+	void EmitMLeader(MultiLeader m, Affine t, int layer, int rgb)
+	{
+		var c = m.ContextData;
+		if (c == null) { Unrendered("MULTILEADER (no content data)"); return; }
+		int lineRgb = ColorOf(m.LineColor, layer, rgb);
+		bool lines = m.PathType != MultiLeaderPathType.Invisible;
+		foreach (var root in c.LeaderRoots ?? (IList<MultiLeaderObjectContextData.LeaderRoot>)Array.Empty<MultiLeaderObjectContextData.LeaderRoot>())
+		{
+			var conn = (root.ConnectionPoint.X, root.ConnectionPoint.Y);
+			foreach (var ln in root.Lines ?? (IList<MultiLeaderObjectContextData.LeaderLine>)Array.Empty<MultiLeaderObjectContextData.LeaderLine>())
+			{
+				var pts = (ln.Points ?? (IList<XYZ>)Array.Empty<XYZ>()).Select(p => (p.X, p.Y)).ToList();
+				pts.Add(conn);
+				if (lines) PrimPolyline(layer, lineRgb, false, pts, t);
+				var size = ln.ArrowheadSize > 0 ? ln.ArrowheadSize : c.ArrowheadSize;
+				if (lines && pts.Count >= 2) EmitArrow(layer, lineRgb, pts[0], pts[1], size, ln.Arrowhead ?? m.Arrowhead, t);
+			}
+			if (lines && m.EnableLanding && m.EnableDogleg && root.LandingDistance > 0)
+				PrimPolyline(layer, lineRgb, false, new() { conn, (conn.X + root.Direction.X * root.LandingDistance, conn.Y + root.Direction.Y * root.LandingDistance) }, t);
+		}
+		if (c.HasTextContents && !string.IsNullOrWhiteSpace(c.TextLabel) && c.TextHeight > 0)
+		{
+			var mt = new MText
+			{
+				Value = c.TextLabel,
+				InsertPoint = c.TextLocation,
+				Height = c.TextHeight,
+				RectangleWidth = c.BoundaryWidth,
+				// MLEADER text hangs from its location; the attachment picks the side it aligns to
+				AttachmentPoint = c.TextAttachmentPoint switch { TextAttachmentPointType.Center => AttachmentPointType.TopCenter, TextAttachmentPointType.Right => AttachmentPointType.TopRight, _ => AttachmentPointType.TopLeft },
+				AlignmentPoint = c.Direction,
+				Style = c.TextStyle ?? m.TextStyle,
+				LineSpacing = c.LineSpacingFactor > 0 ? c.LineSpacingFactor : 1,
+			};
+			int textRgb = ColorOf(c.TextColor, layer, rgb);
+			var ext = EmitMText(mt, layer, textRgb, t);
+			if (m.TextFrame && ext is var (x0, y0, x1, y1))
+			{
+				double g = c.LandingGap, a = Math.Atan2(c.Direction.Y, c.Direction.X), cs = Math.Cos(a), sn = Math.Sin(a);
+				var ins = c.TextLocation;
+				(double, double) At(double x, double y) => (ins.X + x * cs - y * sn, ins.Y + x * sn + y * cs);
+				PrimPolyline(layer, lineRgb, true, new() { At(x0 - g, y0 - g), At(x1 + g, y0 - g), At(x1 + g, y1 + g), At(x0 - g, y1 + g) }, t);
+			}
+		}
+		if (c.HasContentsBlock && c.BlockContent != null)
+		{
+			var b = c.BlockContent;
+			var bp = b.BlockEntity?.BasePoint ?? XYZ.Zero;
+			var s = c.BlockContentScale;
+			var local = Affine.Translate(c.BlockContentLocation.X, c.BlockContentLocation.Y)
+				.Then(Affine.Rotate(c.BlockContentRotation))
+				.Then(Affine.Scale(s.X != 0 ? s.X : 1, s.Y != 0 ? s.Y : 1))
+				.Then(Affine.Translate(-bp.X, -bp.Y));
+			int blockRgb = ColorOf(c.BlockContentColor, layer, rgb);
+			_depth++;
+			foreach (var be in b.Entities) Emit(be, t.Then(local), layer, blockRgb, null);
+			_depth--;
+		}
+	}
+
+	void EmitInsert(Insert ins, Affine t, int layer, int rgb, LineType lt)
 	{
 		if (ins.Block == null) { Unrendered("INSERT (no block)"); return; }
 		var bp = ins.Block.BlockEntity?.BasePoint ?? XYZ.Zero;
@@ -1101,10 +1385,10 @@ sealed class Payload
 					.Then(Affine.Scale(ins.XScale, ins.YScale))
 					.Then(Affine.Translate(-bp.X, -bp.Y));
 				var tt = t.Then(local);
-				foreach (var be in ins.Block.Entities) Emit(be, tt, layer, rgb);
+				foreach (var be in ins.Block.Entities) Emit(be, tt, layer, rgb, lt);
 			}
 		_depth--;
 		// Attributes are already in world (or parent-block) coordinates.
-		foreach (var at in ins.Attributes) Emit(at, t, layer, rgb);
+		foreach (var at in ins.Attributes) Emit(at, t, layer, rgb, lt);
 	}
 }

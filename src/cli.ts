@@ -8,7 +8,8 @@ import { padBbox, unionBbox } from "./geometry.ts";
 import { lintSet, makeContext, RULES, SET_RULES, type LintResult } from "./lint/engine.ts";
 import { entityMatcher, type EntityFilter } from "./query.ts";
 import { sewerNetwork } from "./lint/sewer.ts";
-import { renderSvg } from "./render-svg.ts";
+import { missingRasters } from "./rasters.ts";
+import { RASTER_LIMIT, renderSvg } from "./render-svg.ts";
 import { workingScale } from "./sheet.ts";
 import { buildStamp } from "./sidecar.ts";
 import { DrawingStore, expandHome } from "./store.ts";
@@ -98,6 +99,8 @@ async function cmdInspect(store: DrawingStore, file: string, flags: Flags) {
     blocks: Object.entries(blocks).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })),
     layouts: d.layouts,
     unrendered: d.unrendered,
+    approximated: d.approximated,
+    images: { placed: d.rasters.length, embedded: d.rasters.filter((r) => r.src).length, missing: missingRasters(d) },
     ms: Date.now() - t0,
   };
   if (flags.json) return console.log(JSON.stringify(summary, null, 2));
@@ -114,7 +117,11 @@ async function cmdInspect(store: DrawingStore, file: string, flags: Flags) {
   console.log(`types     ${Object.entries(types).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(", ")}`);
   console.log(`layers    ${layers.length} used of ${d.layers.length}: ${layers.slice(0, 15).map((l) => `${l.name} ${l.entities}${!l.on || l.frozen ? " (hidden)" : ""}`).join(", ")}${layers.length > 15 ? ", …" : ""}`);
   if (summary.blocks.length) console.log(`inserts   ${summary.blocks.slice(0, 12).map((b) => `${b.name} ${b.count}`).join(", ")}${summary.blocks.length > 12 ? ", …" : ""}`);
+  if (summary.images.placed) console.log(`images    ${summary.images.placed} placed${summary.images.embedded ? `, ${summary.images.embedded} embedded in OLE objects` : ""}`);
+  for (const m of summary.images.missing)
+    console.log(`warning   image ${m.reason}: ${m.file} (${m.handles.length} IMAGE ${m.handles.slice(0, 4).join(", ")}${m.handles.length > 4 ? ", …" : ""}); looked in ${m.tried.join(", ")}`);
   if (Object.keys(d.unrendered).length) console.log(`not drawn ${Object.entries(d.unrendered).map(([k, v]) => `${k} ${v}`).join(", ")}`);
+  if (Object.keys(d.approximated).length) console.log(`approx.   ${Object.entries(d.approximated).map(([k, v]) => `${k} ${v}`).join(", ")}`);
 }
 
 function entityFilter(flags: Flags): EntityFilter {
@@ -264,6 +271,9 @@ async function cmdRender(store: DrawingStore, file: string, flags: Flags) {
   if (!bbox) throw new Error("drawing has no extents");
   const width = Number(str(flags, "width") ?? 1600);
   const svg = renderSvg(d, { bbox, width, dark: !!flags.dark, highlight, findings });
+  for (const m of missingRasters(d, RASTER_LIMIT))
+    if (svg.includes(m.file.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!)))
+      console.error(`warning: image ${m.reason}, not drawn: ${m.file} (IMAGE ${m.handles.join(", ")})`);
   if (/\.png$/i.test(out)) {
     const via = svgToPng(svg, out, width);
     console.log(`${out}  (${via}; region ${bbox.map(fmtN).join(", ")})`);

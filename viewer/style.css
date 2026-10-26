@@ -23,6 +23,65 @@
   font-display: swap;
 }
 
+/* Drawing text: Arimo and Tinos have Arial's and Times New Roman's advance widths, so text
+   laid out with AutoCAD's metrics draws to the same widths on every machine. */
+@font-face {
+  font-family: "Cadkit Sans";
+  src: url("/fonts/arimo-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Cadkit Sans";
+  src: url("/fonts/arimo-latin-400-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: block;
+}
+@font-face {
+  font-family: "Cadkit Sans";
+  src: url("/fonts/arimo-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Cadkit Sans";
+  src: url("/fonts/arimo-latin-700-italic.woff2") format("woff2");
+  font-weight: 700;
+  font-style: italic;
+  font-display: block;
+}
+@font-face {
+  font-family: "Cadkit Serif";
+  src: url("/fonts/tinos-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Cadkit Serif";
+  src: url("/fonts/tinos-latin-400-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: block;
+}
+@font-face {
+  font-family: "Cadkit Serif";
+  src: url("/fonts/tinos-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Cadkit Serif";
+  src: url("/fonts/tinos-latin-700-italic.woff2") format("woff2");
+  font-weight: 700;
+  font-style: italic;
+  font-display: block;
+}
+
 :root {
   --bg: #0d0e11;
   --panel: #131519;
@@ -978,7 +1037,20 @@ body.left-hidden #ribbon-left, body.right-hidden #ribbon-right { display: flex; 
 .status-meta .chip strong { color: var(--text); font-weight: 600; }
 .status-meta .chip.alert { color: var(--error); border-color: color-mix(in srgb, var(--error) 40%, transparent); }
 .status-meta .chip.alert strong { color: var(--error); }
+.status-meta .chip.warn { color: var(--warning, #f0b64b); border-color: color-mix(in srgb, var(--warning, #f0b64b) 45%, transparent); cursor: pointer; }
+.status-meta .meta-fidelity { cursor: pointer; }
 .status-end { color: var(--faint); }
+.fidelity-pop { top: auto; bottom: 14px; width: min(560px, calc(100% - 28px)); }
+.fidelity-pop .clipboard-head .micro-label { color: var(--warning, #f0b64b); }
+#fidelity-note { flex: 1; min-width: 0; font-size: var(--fs-small); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#fidelity-close { flex: none; font-size: var(--fs-small); color: var(--dim); }
+#fidelity-list { margin: 0; padding: 8px 12px 10px; max-height: 260px; overflow: auto; list-style: none; font-size: var(--fs-small); line-height: 1.5; color: var(--text); user-select: text; }
+#fidelity-list li { padding: 4px 0; border-bottom: 1px solid var(--line-soft); }
+#fidelity-list li:last-child { border-bottom: 0; }
+#fidelity-list li b { font-weight: 600; margin-right: 4px; color: var(--dim); }
+#fidelity-list li.missing b { color: var(--warning, #f0b64b); }
+#fidelity-list li span { display: block; color: var(--dim); }
+#fidelity-list code { font-family: var(--mono); word-break: break-all; }
 
 /* ---------------------------------------------------------------- tooltip */
 

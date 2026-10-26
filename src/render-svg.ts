@@ -1,26 +1,16 @@
 // Region -> SVG, for agents and reports: the same primitives the viewer draws.
 
-import { existsSync, readFileSync, statSync } from "node:fs";
-import path from "node:path";
+import { readFileSync } from "node:fs";
 import { intersects } from "./geometry.ts";
+import { resolveRaster } from "./rasters.ts";
 import type { Bbox, Drawing, Finding } from "./types.ts";
 
-const RASTER_TYPES: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
-const RASTER_LIMIT = 6 * 1024 * 1024;
+export const RASTER_LIMIT = 6 * 1024 * 1024;
 
-function rasterHref(d: Drawing, ref: string): string | null {
-  const dir = path.dirname(d.source.path);
-  const normalized = ref.replace(/\\/g, "/");
-  const base = path.basename(normalized);
-  for (const candidate of [normalized, path.resolve(dir, normalized), path.join(dir, base)]) {
-    const abs = path.resolve(candidate);
-    const type = RASTER_TYPES[path.extname(abs).toLowerCase()];
-    if (!type || !existsSync(abs)) continue;
-    const stat = statSync(abs);
-    if (!stat.isFile() || stat.size > RASTER_LIMIT) continue;
-    return `data:${type};base64,${readFileSync(abs).toString("base64")}`;
-  }
-  return null;
+function rasterHref(d: Drawing, ref: string, src?: string): string | null {
+  if (src) return d.images?.[src] ?? null;
+  const found = resolveRaster(d.source.path, ref, RASTER_LIMIT);
+  return found ? `data:${found.type};base64,${readFileSync(found.abs).toString("base64")}` : null;
 }
 
 const hex = (rgb: number, dark: boolean) => {
@@ -29,6 +19,19 @@ const hex = (rgb: number, dark: boolean) => {
   return "#" + rgb.toString(16).padStart(6, "0");
 };
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+
+const SANS = "'Liberation Sans', Arimo, Arial, Helvetica, sans-serif";
+const SERIF = "'Liberation Serif', Tinos, 'Times New Roman', Times, serif";
+// Font size per capital height for the faces drawn (Liberation's capitals are 0.688 and 0.655
+// em); widths are fitted separately, to the advance each text primitive carries.
+const EM_PER_CAP = { sans: 1 / 0.688, serif: 0.973 / 0.655 };
+
+// stroke-dasharray for a stroke's dash pattern at k px per unit; continuous when too fine to see.
+function dashArray(d: Drawing, index: number | undefined, k: number): string {
+  const pattern = index === undefined ? undefined : d.dashes?.[index];
+  if (!pattern || pattern.reduce((a, b) => a + b, 0) * k < 3) return "";
+  return ` stroke-dasharray="${pattern.map((v) => Math.max(v * k, 1).toFixed(2)).join(" ")}"`;
+}
 
 export interface SvgOptions {
   bbox: Bbox; // world
@@ -51,7 +54,7 @@ export function renderSvg(d: Drawing, o: SvgOptions): string {
   const Y = (y: number) => ((rel[3] - y) * k).toFixed(2);
   const bg = o.dark ? "#16181d" : "#ffffff";
   const parts: string[] = [];
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Arial, Helvetica, sans-serif">`);
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${SANS}">`);
   parts.push(`<rect width="100%" height="100%" fill="${bg}"/>`);
   const hl = o.highlight ?? new Set<number>();
   const hidden = o.hiddenLayers ?? new Set<number>();
@@ -59,8 +62,9 @@ export function renderSvg(d: Drawing, o: SvgOptions): string {
   const skippedRasters = new Set<string>();
   for (const [ri, e] of (d.rasters ?? []).entries()) {
     if (hidden.has(e.layer)) continue;
-    if (!rasters.has(e.file)) rasters.set(e.file, rasterHref(d, e.file));
-    const href = rasters.get(e.file);
+    const key = e.src ? `embedded:${e.src}` : e.file;
+    if (!rasters.has(key)) rasters.set(key, rasterHref(d, e.file, e.src));
+    const href = rasters.get(key);
     if (!href) {
       skippedRasters.add(e.file);
       continue;
@@ -109,36 +113,50 @@ export function renderSvg(d: Drawing, o: SvgOptions): string {
         let dstr = "";
         for (let i = 0; i < f.length; i += 2) dstr += (i ? "L" : "M") + X(f[i]) + " " + Y(f[i + 1]);
         if (p[4]) dstr += "Z";
-        parts.push(`<path d="${dstr}" fill="none" stroke="${col}" stroke-width="${sw}"/>`);
+        parts.push(`<path d="${dstr}" fill="none" stroke="${col}" stroke-width="${sw}"${dashArray(d, p[6], k)}/>`);
+        break;
+      }
+      case "l": {
+        const f = p[4];
+        let dstr = "";
+        for (let i = 0; i + 3 < f.length; i += 4) {
+          if (!intersects(rel, [Math.min(f[i], f[i + 2]), Math.min(f[i + 1], f[i + 3]), Math.max(f[i], f[i + 2]), Math.max(f[i + 1], f[i + 3])])) continue;
+          dstr += `M${X(f[i])} ${Y(f[i + 1])}L${X(f[i + 2])} ${Y(f[i + 3])}`;
+        }
+        if (dstr) parts.push(`<path d="${dstr}" fill="none" stroke="${col}" stroke-width="${sw}"/>`);
         break;
       }
       case "f": {
+        const mode = p[4];
+        if (mode === 3 && !hl.has(ent)) continue; // picking area: its pattern or picture is drawn separately
         const loops = p[5];
-        let dstr = "", any = false;
+        let dstr = "";
+        let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
         for (const f of loops) {
           for (let i = 0; i < f.length; i += 2) {
-            if (f[i] >= rel[0] && f[i] <= rel[2] && f[i + 1] >= rel[1] && f[i + 1] <= rel[3]) any = true;
+            bx0 = Math.min(bx0, f[i]); bx1 = Math.max(bx1, f[i]); by0 = Math.min(by0, f[i + 1]); by1 = Math.max(by1, f[i + 1]);
             dstr += (i ? "L" : "M") + X(f[i]) + " " + Y(f[i + 1]);
           }
           dstr += "Z";
         }
-        if (!any) continue;
-        parts.push(`<path d="${dstr}" fill="${col}" fill-opacity="${p[4] ? 0.85 : 0.18}" fill-rule="evenodd" stroke="none"/>`);
+        if (!intersects(rel, [bx0, by0, bx1, by1])) continue;
+        const opacity = mode === 0 ? 0.18 : mode === 3 ? 0.3 : 1;
+        parts.push(`<path d="${dstr}" fill="${col}"${opacity < 1 ? ` fill-opacity="${opacity}"` : ""} fill-rule="${mode === 2 ? "nonzero" : "evenodd"}" stroke="none"/>`);
         break;
       }
       case "c": {
-        const [, , , , x, y, r] = p;
+        const [, , , , x, y, r, dash] = p;
         if (!intersects(rel, [x - r, y - r, x + r, y + r])) continue;
-        parts.push(`<circle cx="${X(x)}" cy="${Y(y)}" r="${(r * k).toFixed(2)}" fill="none" stroke="${col}" stroke-width="${sw}"/>`);
+        parts.push(`<circle cx="${X(x)}" cy="${Y(y)}" r="${(r * k).toFixed(2)}" fill="none" stroke="${col}" stroke-width="${sw}"${dashArray(d, dash, k)}/>`);
         break;
       }
       case "a": {
-        const [, , , , x, y, r, a0, a1] = p;
+        const [, , , , x, y, r, a0, a1, dash] = p;
         if (!intersects(rel, [x - r, y - r, x + r, y + r])) continue;
         let sweep = a1 - a0;
         while (sweep <= 0) sweep += 2 * Math.PI;
         const sx = x + r * Math.cos(a0), sy = y + r * Math.sin(a0), ex = x + r * Math.cos(a1), ey = y + r * Math.sin(a1);
-        parts.push(`<path d="M${X(sx)} ${Y(sy)}A${(r * k).toFixed(2)} ${(r * k).toFixed(2)} 0 ${sweep > Math.PI ? 1 : 0} 0 ${X(ex)} ${Y(ey)}" fill="none" stroke="${col}" stroke-width="${sw}"/>`);
+        parts.push(`<path d="M${X(sx)} ${Y(sy)}A${(r * k).toFixed(2)} ${(r * k).toFixed(2)} 0 ${sweep > Math.PI ? 1 : 0} 0 ${X(ex)} ${Y(ey)}" fill="none" stroke="${col}" stroke-width="${sw}"${dashArray(d, dash, k)}/>`);
         break;
       }
       case "d": {
@@ -148,14 +166,17 @@ export function renderSvg(d: Drawing, o: SvgOptions): string {
         break;
       }
       case "t": {
-        const [, , , , x, y, h, rot, align, text, font, wf] = p;
+        const [, , , , x, y, h, rot, align, text, font, , width] = p;
         const px = h * k;
-        if (px < 2 || x < rel[0] - h * text.length || x > rel[2] + h || y < rel[1] - h * 2 || y > rel[3] + h * 2) continue;
+        if (px < 2 || x < rel[0] - width - h || x > rel[2] + width + h || y < rel[1] - width - h * 2 || y > rel[3] + width + h * 2) continue;
+        const [family, style = ""] = font.split("|");
+        const serif = family === "serif";
         const anchor = align[0] === "c" ? "middle" : align[0] === "r" ? "end" : "start";
         // h is the capital height (AutoCAD's text height); top and middle refer to it
         const dy = align[1] === "t" ? px : align[1] === "m" ? px / 2 : 0;
+        const fit = width > 0 ? ` textLength="${(width * k).toFixed(2)}" lengthAdjust="spacingAndGlyphs"` : "";
         parts.push(
-          `<text xml:space="preserve" x="${X(x)}" y="${Y(y)}" dy="${dy.toFixed(2)}" font-size="${(px * (font === "serif" ? 1.47 : 1 / 0.72)).toFixed(2)}"${font === "serif" ? ` font-family="'Times New Roman', Times, 'Liberation Serif', serif"` : ""} fill="${col}" text-anchor="${anchor}" transform="rotate(${((-rot * 180) / Math.PI).toFixed(2)} ${X(x)} ${Y(y)})${wf !== 1 ? ` matrix(${wf} 0 0 1 ${(Number(X(x)) * (1 - wf)).toFixed(2)} 0)` : ""}">${esc(text)}</text>`,
+          `<text xml:space="preserve" x="${X(x)}" y="${Y(y)}" dy="${dy.toFixed(2)}" font-size="${(px * EM_PER_CAP[serif ? "serif" : "sans"]).toFixed(2)}"${serif ? ` font-family="${SERIF}"` : ""}${style.includes("b") ? ` font-weight="bold"` : ""}${style.includes("i") ? ` font-style="italic"` : ""} fill="${col}" text-anchor="${anchor}"${fit} transform="rotate(${((-rot * 180) / Math.PI).toFixed(2)} ${X(x)} ${Y(y)})">${esc(text)}</text>`,
         );
         break;
       }

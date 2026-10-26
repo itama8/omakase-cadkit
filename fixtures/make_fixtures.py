@@ -157,9 +157,109 @@ def hatch_text_fixture():
     doc.saveas(OUT / "hatch_text.dxf")
 
 
+def fidelity_fixture():
+    """Redistributable details: wrapped runs, wide bands, leaders, pattern islands, OLE table/logo."""
+    from ezdxf.lldxf.tags import Tags
+    from ezdxf.lldxf.types import DXFTag, DXFVertex, DXFBinaryTag
+    from ezdxf.math import Vec2
+    from ezdxf.render.mleader import ConnectionSide
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+    doc.styles.new("CAD_SANS", dxfattribs={"font": "arial.ttf"})
+    doc.styles.new("CAD_SHX", dxfattribs={"font": "romans.shx"})
+    msp.add_mtext(r"{\fTimes New Roman|b1|i0;PROJECT TITLE}\P{\H0.7x;ALPHA BETA GAMMA DELTA EPSILON ZETA}",
+                  dxfattribs={"insert": (0, 60), "char_height": 3, "width": 30, "style": "CAD_SANS"})
+    msp.add_text("%%uNOTE%%u 90%%d", dxfattribs={"insert": (40, 55), "height": 3, "style": "CAD_SANS"})
+    msp.add_text("STROKE FONT", dxfattribs={"insert": (40, 62), "height": 3, "style": "CAD_SHX"})
+    msp.add_text("FITTED", dxfattribs={"height": 3, "style": "CAD_SANS", "insert": (40, 48), "align_point": (70, 48), "halign": 5})
+    msp.add_lwpolyline([(0, 30), (20, 30), (20, 40)], dxfattribs={"const_width": 4, "color": 1})
+    doc.linetypes.new("DETAIL_DASH", dxfattribs={"pattern": [6, 4, -2]})
+    msp.add_line((0, 25), (30, 25), dxfattribs={"linetype": "DETAIL_DASH", "ltscale": 2})
+    hatch = msp.add_hatch(color=3)
+    hatch.paths.add_polyline_path([(0, 0), (30, 0), (30, 20), (0, 20)], is_closed=True, flags=1)
+    hatch.paths.add_polyline_path([(10, 5), (20, 5), (20, 15), (10, 15)], is_closed=True, flags=16)
+    hatch.set_pattern_fill("ANSI31", scale=0.5, color=3)
+    msp.add_leader([(40, 0), (45, 8), (55, 8)], override={"dimasz": 3}, dxfattribs={"has_arrowhead": 1})
+    leader = msp.add_multileader_mtext()
+    leader.set_content("CALLOUT", char_height=3, style="CAD_SANS")
+    leader.set_arrow_properties(size=3)
+    leader.set_connection_properties(landing_gap=1, dogleg_length=4)
+    leader.add_leader_line(ConnectionSide.left, [Vec2(40, 20), Vec2(45, 28)])
+    leader.build(Vec2(55, 28))
+
+    # A minimal compound file containing one ordinary (>=4096 byte) CONTENTS stream.
+    # It is generated here, with synthetic EMF records; no client bytes are copied.
+    def compound(contents):
+        contents = contents.ljust(max(4096, (len(contents)+511)//512*512), b"\0")
+        n = len(contents)//512
+        header = bytearray(512)
+        header[:8] = bytes.fromhex("d0cf11e0a1b11ae1")
+        struct.pack_into("<HHHHH", header, 24, 0x3e, 3, 0xfffe, 9, 6)
+        struct.pack_into("<IIIIIIIII", header, 40, 0, 1, n, 0, 4096, 0xfffffffe, 0, 0xfffffffe, 0)
+        struct.pack_into("<109I", header, 76, n+1, *([0xffffffff]*108))
+        directory = bytearray(512)
+        for off, name, kind, child, start, size in [(0, "Root Entry", 5, 1, 0xfffffffe, 0), (128, "CONTENTS", 2, 0xffffffff, 0, len(contents))]:
+            label=(name+"\0").encode("utf-16le")
+            directory[off:off+len(label)] = label
+            struct.pack_into("<HBBIII", directory, off+64, len(label), kind, 1, 0xffffffff, 0xffffffff, child)
+            struct.pack_into("<IQ", directory, off+116, start, size)
+        fat = list(range(1,n)) + [0xfffffffe, 0xfffffffe, 0xfffffffd]
+        return bytes(header)+contents+bytes(directory)+struct.pack("<128I", *fat, *([0xffffffff]*(128-len(fat))))
+
+    def record(kind, body):
+        body += b"\0"*((-len(body))%4)
+        return struct.pack("<II", kind, 8+len(body))+body
+    def emf(records):
+        h=bytearray(88)
+        struct.pack_into("<II4i4iIIIIHHIII4i", h, 0, 1, 88, 0, 0, 100, 100, 0, 0, 10000, 10000,
+                         0x464d4520, 0x10000, 88+sum(map(len, records))+20, len(records)+2, 8, 0, 0, 0, 0, 100, 100, 100, 100)
+        return bytes(h)+b"".join(records)+record(14, struct.pack("<III",0,0,20))
+    def ole(picture, x):
+        # AutoCAD's OLE binary prefix repeats the four frame corners before the CFB.
+        prefix=bytearray(128)
+        struct.pack_into("<H",prefix,0,0x5581)
+        for i, point in enumerate([(x,20,0),(x+20,20,0),(x+20,0,0),(x,0,0)]):
+            struct.pack_into("<3d",prefix,2+i*24,*point)
+        raw=bytes(prefix)+compound(picture)
+        entity=msp.new_entity("OLE2FRAME", dxfattribs={})
+        entity.acdb_ole2frame=Tags([DXFTag(100,"AcDbOle2Frame"), DXFTag(70,2),
+            DXFVertex(10,(x,20,0)), DXFVertex(11,(x+20,0,0)), DXFTag(71,2), DXFTag(72,0), DXFTag(73,0), DXFTag(90,len(raw))]
+            +[DXFBinaryTag(310,raw[i:i+127]) for i in range(0,len(raw),127)]+[DXFTag(1,"OLE")])
+    # Vector table with three rules and one text run fitted using per-character advances.
+    font=bytearray(96)
+    struct.pack_into("<Ii",font,0,1,-12)
+    struct.pack_into("<i",font,20,400)
+    font[32:42]="Arial".encode("utf-16le")
+    text="A1 B2".encode("utf-16le")
+    tx=bytearray(68)
+    struct.pack_into("<IffiiIII4iI",tx,16,1,1,1,5,20,5,76,0,0,0,100,100,88)
+    ole(emf([record(82,bytes(font)), record(37,struct.pack("<I",1)),
+        record(27,struct.pack("<ii",0,0)), record(54,struct.pack("<ii",100,0)),
+        record(27,struct.pack("<ii",0,50)), record(54,struct.pack("<ii",100,50)),
+        record(27,struct.pack("<ii",50,0)), record(54,struct.pack("<ii",50,100)),
+        record(84,bytes(tx)+text+b"\0\0"+struct.pack("<5i",8,8,8,8,8))]),80)
+    # Two-pass logo: left pixel is opaque blue; right pixel preserves the destination.
+    def bitmap(rop, pixels):
+        info=struct.pack("<IiiHHIIIIII",40,2,1,1,24,0,8,0,0,0,0)
+        body=struct.pack("<4i6i6I2i",0,0,100,100,0,0,0,0,2,1,80,40,120,8,0,rop,100,100)
+        return record(81,body+info+pixels+b"\0\0")
+    ole(emf([bitmap(0x00ee0086,bytes([255,255,255,0,0,0])), bitmap(0x008800c6,bytes([220,70,10,255,255,255]))]),110)
+    image=doc.add_image_def(filename="missing-logo.png",size_in_pixel=(8,8))
+    msp.add_image(image,insert=(135,0),size_in_units=(20,20))
+    # Explicit defaults exercise the supported LEADER flag, rather than ACadSharp's
+    # incorrect default when DXF group 71 is absent (tracked as a remaining reader limit).
+    doc.saveas(OUT / "fidelity.dxf")
+    from ezdxf.lldxf.tagwriter import TagWriter
+    with (OUT / "fidelity.dxf").open("w", encoding="utf-8") as stream:
+        writer = TagWriter(stream, dxfversion=doc.dxfversion)
+        writer.force_optional = True
+        doc.export_sections(writer)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     hatch_text_fixture()
+    fidelity_fixture()
     doc, msp = base()
     network(msp, bad=False)
     doc.saveas(OUT / "sewer_clean.dxf")

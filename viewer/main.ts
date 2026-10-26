@@ -489,29 +489,57 @@ async function open(path: string, opts: { hash?: string } = {}) {
   }
 }
 
+/** Image files the drawing refers to that could not be shown, with where the server looked. */
+let missingImages: { file: string; handles: string[]; tried: string[]; error: string }[] = [];
+
 async function loadImages(request: number, drawing: Drawing, path: string) {
-  // One fetch per image entity: a block's image placed by many inserts shares the bitmap.
+  // One fetch per image: a block's image placed by many inserts shares the bitmap, and
+  // pictures embedded in OLE objects come from the payload itself.
+  missingImages = [];
+  renderMeta();
   const rasters = drawing.rasters ?? [];
   if (!rasters.length) return;
+  const failures = new Map<string, { file: string; handles: string[]; tried: string[]; error: string }>();
   const bitmaps = new Map<string, Promise<ImageBitmap | null>>();
   for (const r of rasters) {
-    if (bitmaps.has(r.h)) continue;
+    const key = r.src ? `src:${r.src}` : `file:${r.file}`;
+    if (bitmaps.has(key)) continue;
+    const url = r.src ? drawing.images?.[r.src] : `/api/raster?file=${encodeURIComponent(path)}&handle=${encodeURIComponent(r.h)}`;
     bitmaps.set(
-      r.h,
-      fetch(`/api/raster?file=${encodeURIComponent(path)}&handle=${encodeURIComponent(r.h)}`)
-        .then(async (res) => (res.ok ? createImageBitmap(await res.blob()) : null))
-        .catch(() => null),
+      key,
+      !url
+        ? Promise.resolve(null)
+        : fetch(url)
+            .then(async (res) => {
+              if (res.ok) return createImageBitmap(await res.blob());
+              const body: { tried?: string[]; error?: string } = await res.json().catch(() => ({}));
+              const f = failures.get(r.file) ?? { file: r.file, handles: [] as string[], tried: body.tried ?? [], error: body.error ?? `HTTP ${res.status}` };
+              f.handles.push(r.h);
+              failures.set(r.file, f);
+              return null;
+            })
+            .catch((err: unknown) => {
+              failures.set(r.file, { file: r.file, handles: [], tried: [], error: `Image could not be decoded or loaded: ${err instanceof Error ? err.message : String(err)}` });
+              return null;
+            }),
     );
   }
   const loaded = await Promise.all(rasters.map(async (r) => {
-    const bitmap = await bitmaps.get(r.h)!;
+    const bitmap = await bitmaps.get(r.src ? `src:${r.src}` : `file:${r.file}`)!;
+    if (!bitmap) {
+      const failure = failures.get(r.file) ?? { file: r.file, handles: [] as string[], tried: [], error: "Embedded picture data is unavailable" };
+      if (!failure.handles.includes(r.h)) failure.handles.push(r.h);
+      failures.set(r.file, failure);
+    }
     return bitmap ? ({ ...r, bitmap } as RasterOverlay) : null;
   }));
   if (request !== openRequest) return;
+  missingImages = [...failures.values()];
   const images = loaded.filter((x): x is RasterOverlay => x !== null);
   view.setImages(images);
   $("#background-tools").hidden = !images.length;
   renderLayers();
+  renderMeta();
 }
 
 function setBackgroundImage(on: boolean, save = true) {
@@ -548,11 +576,58 @@ function renderMeta() {
   const issue = errors || warnings
     ? `<span class="chip alert" title="Errors and warnings in this drawing"><strong>${errors}</strong> err <strong>${warnings}</strong> warn</span>`
     : `<span class="chip" title="No errors or warnings"><strong>clean</strong></span>`;
+  const gaps = fidelityGaps();
+  const fidelity = gaps.missing + gaps.unrendered
+    ? `<button class="chip warn meta-fidelity" title="Parts of this drawing are not drawn as in the file. Click for the list." aria-label="Show what is not drawn">${gaps.missing + gaps.unrendered} not drawn</button>`
+    : gaps.approximated
+      ? `<button class="chip meta-fidelity" title="Some parts are drawn with stand-ins (fonts, gradients). Click for the list." aria-label="Show what is approximated">${gaps.approximated} approx.</button>`
+      : "";
   $("#meta").innerHTML =
     `<span class="chip" title="AutoCAD file version and format">${esc(d.acadVersion)} ${esc(d.source.format.toUpperCase())}</span>` +
     `<button class="chip meta-units" title="Units used to read sizes (file header: ${esc(d.header.insUnits)}). Click to change them." aria-label="Edit drawing units">units ${esc(lint?.sheet?.units.used ?? d.header.insUnits)}</button>` +
+    fidelity +
     issue;
+  if (!$("#fidelity-pop").classList.contains("hidden")) renderFidelity();
 }
+
+// ------------------------------------------------------------------ fidelity
+
+/** Counts of what the reviewer is not seeing as the file has it. */
+function fidelityGaps() {
+  const d = drawing;
+  const sum = (o?: Record<string, number>) => Object.values(o ?? {}).reduce((a, b) => a + b, 0);
+  return { missing: missingImages.reduce((a, m) => a + m.handles.length, 0), unrendered: sum(d?.unrendered) + (d?.emitErrors?.length ?? 0), approximated: Object.keys(d?.approximated ?? {}).length };
+}
+
+function renderFidelity() {
+  const d = drawing;
+  if (!d) return;
+  const items: string[] = [];
+  for (const m of missingImages)
+    items.push(`<li class="missing"><b>Image not drawn</b> <code>${esc(m.file)}</code><span>Handles: ${esc(m.handles.slice(0, 6).join(", "))}${m.handles.length > 6 ? ", …" : ""}. ${esc(m.error)}${m.tried.length ? `. Check the referenced file or put a supported image next to the drawing. Looked in: ${m.tried.map((t) => `<code>${esc(t)}</code>`).join(", ")}` : ""}</span></li>`);
+  for (const [what, n] of Object.entries(d.unrendered ?? {}))
+    items.push(`<li class="missing"><b>Not drawn</b> ${esc(what)} <span>× ${n}</span></li>`);
+  for (const error of d.emitErrors ?? [])
+    items.push(`<li class="missing"><b>Drawing error</b> ${esc(error)}</li>`);
+  for (const [what, n] of Object.entries(d.approximated ?? {}))
+    items.push(`<li><b>Approximated</b> ${esc(what)} <span>× ${n}</span></li>`);
+  const gaps = fidelityGaps();
+  $("#fidelity-note").textContent = "Model space only. Plot styles, fonts and OLE clipping can differ; compare critical details with the issued sheet.";
+  $("#fidelity-list").innerHTML = items.join("") || "<li>No missing elements were reported by the reader.</li>";
+}
+
+$("#meta").addEventListener("click", (e) => {
+  if (!(e.target as HTMLElement).closest(".meta-fidelity")) return;
+  const pop = $("#fidelity-pop");
+  pop.classList.toggle("hidden");
+  if (!pop.classList.contains("hidden")) renderFidelity();
+});
+$("#fidelity-close").addEventListener("click", () => $("#fidelity-pop").classList.add("hidden"));
+
+// Drawing text uses bundled faces with AutoCAD's widths; tiles drawn before they load are redrawn.
+void Promise.all(
+  ["Cadkit Sans", "Cadkit Serif"].flatMap((family) => ["", "bold ", "italic ", "italic bold "].map((style) => document.fonts.load(`${style}16px "${family}"`))),
+).then(() => view.refresh());
 
 // ------------------------------------------------------------------ layers
 

@@ -9,6 +9,9 @@ fixtures/*.png
 .cache/
 dist/
 
+# Local review drawings and issued PDFs may contain private project data.
+trial-data/
+
 # User-local bootstrap tools and remembered tool paths
 .tools/
 
