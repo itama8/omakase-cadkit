@@ -28,8 +28,9 @@ omakase-cadkit on drawings (not developing it) is covered by `skills/omakase-cad
 - `npm run bundle` builds the download ZIP for the current platform (prebuilt sidecar, its
   own Node runtime, compiled CLI, viewer). CI attaches those to a `v*` tag's release, so a
   tester unzips and launches with no tools installed. Needs the .NET SDK and `zip`. On
-  Windows it also builds `omakase-cadkit.exe` (`launcher/`, no console window) and, when
-  Inno Setup 6 is installed, the per-user installer from `installer/omakase-cadkit.iss`.
+  Windows it builds `omakase-cadkit.exe` (`launcher/`, no console window) and ships only
+  the per-user installer from `installer/omakase-cadkit.iss` (Inno Setup 6; without it,
+  a local build falls back to a ZIP).
 - `node scripts/make-icon.mjs` regenerates the committed app icon in `assets/` and
   `viewer/favicon.svg` (needs rsvg-convert and magick).
 - `node scripts/shot.mjs <viewer-url> out.png [w h] [--eval js]` screenshots the viewer

@@ -87,55 +87,65 @@ copy("scripts/launch.ps1");
 // the installer's Start menu shortcut and "Open with" point at.
 if (win) run(dotnet, ["build", "launcher", "-c", "Release", "-o", stage, "-p:Version=" + pkg.version.replace(/-.*/, "")]);
 
-// Downloading an unsigned ZIP can add a quarantine flag on macOS; say so before it bites.
-writeFileSync(path.join(stage, "START-HERE.txt"), `omakase-cadkit ${pkg.version} — alpha
+// What the folder says about itself. Windows ships it inside the installer; other systems
+// ship it as a ZIP, where an unsigned download can be quarantined on macOS.
+writeFileSync(path.join(stage, "START-HERE.txt"), win ? `omakase-cadkit ${pkg.version} — alpha
+
+1. Start it from the Start menu (omakase-cadkit), or right-click a .dwg or .dxf file and
+   choose Open with > omakase-cadkit. No console window opens; the viewer appears in your
+   browser at http://127.0.0.1:4280/.
+2. Click the drawing in the middle to pick a file, or use the folder icon in the header or
+   Files panel to choose a folder, then click a drawing. The curved back arrow returns to
+   the parent folder.
+3. Command line, from this folder: launch.cmd lint fixtures\\sewer_bad.dxf
+   or launch.cmd view "C:\\path\\to\\drawing.dwg"
+4. Uninstall from Settings > Apps > Installed apps.
+
+The installer is unsigned: if Windows says "Windows protected your PC", choose More info,
+then Run anyway. What is not drawn yet: paper-space layouts, OLE table contents, hatch
+textures, linetypes. Report problems at https://github.com/itama8/omakase-cadkit/issues
+with your Windows version and what you did. Keep private drawings local.
+` : `omakase-cadkit ${pkg.version} — alpha
 
 1. Keep this folder where you unzipped it. It contains everything the app needs.
-   No setup.cmd is needed: this download is already built.${win ? `
-   Prefer an installer? ${name}-setup.exe on the release page installs
-   the same app with a Start menu entry and "Open with" for drawings. Both are unsigned:
-   if Windows says "Windows protected your PC", choose More info, then Run anyway.` : ""}
-2. Launch: double-click ${win ? "omakase-cadkit.exe (or launch.cmd)" : "launch.command"}
+   No setup.command is needed: this download is already built.
+2. Launch: double-click launch.command
    (macOS: if the system refuses to run it, right-click it and choose Open, or run
    "xattr -dr com.apple.quarantine ." once in this folder.)
 3. The viewer opens at http://127.0.0.1:4280/ — click the drawing in the middle to pick a file,
    or use the folder icon in the header or Files panel to choose a folder, then click a drawing.
    The curved back arrow returns to the parent folder. Or launch onto a drawing:
-   ${win ? "launch.cmd" : "bash launch.command"} view "C:\\path\\to\\drawing.dwg"
-4. Sample drawings are in fixtures/. Try ${win ? "launch.cmd" : "bash launch.command"} lint fixtures${win ? "\\" : "/"}sewer_bad.dxf
+   bash launch.command view "/path/to/drawing.dwg"
+4. Sample drawings are in fixtures/. Try bash launch.command lint fixtures/sewer_bad.dxf
 
 What is not drawn yet: paper-space layouts, OLE table contents, hatch textures,
 linetypes. Report problems at https://github.com/itama8/omakase-cadkit/issues with
 your OS, the commands you ran and the exit code. Keep private drawings local.
 `);
 
-// Zip with whatever the platform has; testers expect a double-clickable archive.
-const zipPath = path.join(outDir, `${name}.zip`);
-rmSync(zipPath, { force: true });
-if (win) {
-  run("powershell.exe", ["-NoProfile", "-Command", `Compress-Archive -Path '${stage}' -DestinationPath '${zipPath}' -CompressionLevel Optimal`]);
-} else if (spawnSync("zip", ["-v"], { stdio: "ignore" }).status === 0) {
-  run("zip", ["-qr", zipPath, name], { cwd: outDir });
-} else {
-  run("tar", ["-czf", zipPath.replace(/\.zip$/, ".tar.gz"), name], { cwd: outDir });
-}
-
 const mb = (file) => `${(statSync(file).size / 1e6).toFixed(0)} MB`;
 console.log(`bundle: ${path.relative(root, stage)}`);
-console.log(`archive: ${path.relative(root, zipPath)} (${mb(zipPath)})`);
 
-// The Windows installer: Inno Setup packs the same folder. CI must produce it; a local build
-// without Inno Setup still gets the ZIP.
-if (win) {
-  const iscc = [process.env.ISCC, path.join(process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Inno Setup 6", "ISCC.exe"), path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Inno Setup 6", "ISCC.exe"), process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "Inno Setup 6", "ISCC.exe")]
-    .filter(Boolean).find((candidate) => existsSync(candidate));
-  if (iscc) {
-    const setupName = `${name}-setup`;
-    run(iscc, ["/Qp", `/DAppVersion=${pkg.version}`, `/DNumericVersion=${pkg.version.replace(/-.*/, "")}`, `/DSourceDir=${stage}`, `/DOutputDir=${outDir}`, `/DOutputName=${setupName}`, path.join(root, "installer", "omakase-cadkit.iss")]);
-    console.log(`installer: ${path.relative(root, path.join(outDir, setupName + ".exe"))} (${mb(path.join(outDir, setupName + ".exe"))})`);
-  } else if (process.env.CI) {
-    throw new Error("Inno Setup 6 (ISCC.exe) is required to build the Windows installer in CI");
+// Windows ships as an installer only: Inno Setup packs the staged folder. CI must produce
+// it; a local build without Inno Setup falls back to a ZIP so the folder can still be shared.
+const iscc = win && [process.env.ISCC, path.join(process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Inno Setup 6", "ISCC.exe"), path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Inno Setup 6", "ISCC.exe"), process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "Inno Setup 6", "ISCC.exe")]
+  .filter(Boolean).find((candidate) => existsSync(candidate));
+if (iscc) {
+  const setupName = `${name}-setup`;
+  run(iscc, ["/Qp", `/DAppVersion=${pkg.version}`, `/DNumericVersion=${pkg.version.replace(/-.*/, "")}`, `/DSourceDir=${stage}`, `/DOutputDir=${outDir}`, `/DOutputName=${setupName}`, path.join(root, "installer", "omakase-cadkit.iss")]);
+  console.log(`installer: ${path.relative(root, path.join(outDir, setupName + ".exe"))} (${mb(path.join(outDir, setupName + ".exe"))})`);
+} else {
+  if (win && process.env.CI) throw new Error("Inno Setup 6 (ISCC.exe) is required to build the Windows installer in CI");
+  if (win) console.warn("warning: Inno Setup 6 not found; built a ZIP instead. Install it from https://jrsoftware.org/isinfo.php or set ISCC.");
+  // Zip with whatever the platform has; testers expect a double-clickable archive.
+  const zipPath = path.join(outDir, `${name}.zip`);
+  rmSync(zipPath, { force: true });
+  if (win) {
+    run("powershell.exe", ["-NoProfile", "-Command", `Compress-Archive -Path '${stage}' -DestinationPath '${zipPath}' -CompressionLevel Optimal`]);
+  } else if (spawnSync("zip", ["-v"], { stdio: "ignore" }).status === 0) {
+    run("zip", ["-qr", zipPath, name], { cwd: outDir });
   } else {
-    console.warn("warning: Inno Setup 6 not found; built the ZIP only. Install it from https://jrsoftware.org/isinfo.php or set ISCC.");
+    run("tar", ["-czf", zipPath.replace(/\.zip$/, ".tar.gz"), name], { cwd: outDir });
   }
+  console.log(`archive: ${path.relative(root, zipPath)} (${mb(zipPath)})`);
 }
