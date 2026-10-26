@@ -53,6 +53,7 @@
     "sidecar/OmakaseCadkitSidecar.csproj",
     "viewer/index.html",
     "viewer/style.css",
+    "viewer/favicon.svg",
     "viewer/fonts/",
     "viewer/dist/",
     "fixtures/make_fixtures.py",

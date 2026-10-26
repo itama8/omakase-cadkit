@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="omakase-cadkit icon">
+  <defs>
+    <radialGradient id="surface" cx="43%" cy="30%" r="82%">
+      <stop offset="0" stop-color="#1a1e25"/>
+      <stop offset="0.48" stop-color="#101216"/>
+      <stop offset="1" stop-color="#090909"/>
+    </radialGradient>
+    <radialGradient id="aura" cx="50%" cy="48%" r="50%">
+      <stop offset="0" stop-color="#6f8fc2" stop-opacity="0.13"/>
+      <stop offset="0.48" stop-color="#6f8fc2" stop-opacity="0.045"/>
+      <stop offset="1" stop-color="#6f8fc2" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4c5f80" stop-opacity="0.52"/>
+      <stop offset="0.42" stop-color="#29334a" stop-opacity="0.26"/>
+      <stop offset="1" stop-color="#090909" stop-opacity="0.76"/>
+    </linearGradient>
+    <clipPath id="tile"><rect x="44" y="42" width="936" height="936" rx="224"/></clipPath>
+  </defs>
+  <rect x="44" y="54" width="936" height="936" rx="224" fill="#000000" opacity="0.42"/>
+  <rect x="44" y="42" width="936" height="936" rx="224" fill="url(#surface)"/>
+  <rect x="45.5" y="43.5" width="933" height="933" rx="222.5" fill="none" stroke="url(#edge)" stroke-width="3"/>
+  <ellipse cx="512" cy="500" rx="346" ry="360" fill="url(#aura)"/>
+  <g clip-path="url(#tile)" fill="none" stroke="#6f8fc2" stroke-opacity="0.12" stroke-width="16">
+    <path d="M128 0V1024M384 0V1024M640 0V1024M896 0V1024M0 128H1024M0 384H1024M0 640H1024M0 896H1024"/>
+  </g>
+  <path d="M859 824 929 744Q872 725 804.5 709.0Q737 693 663.5 679.0Q590 665 515.0 654.0Q440 643 370 635Q367 653 358.0 676.5Q349 700 342 716Q410 725 482.0 736.5Q554 748 622.5 762.0Q691 776 751.5 792.0Q812 808 859 824ZM310 421H962V329H310ZM350 43H948V-47H350ZM597 697H693V16H597ZM178 567 270 660 271 659V-83H178ZM282 843 375 813Q340 726 292.0 640.0Q244 554 189.0 479.0Q134 404 75 346Q70 357 60.0 375.5Q50 394 38.5 413.0Q27 432 18 443Q71 491 120.0 555.0Q169 619 211.0 692.5Q253 766 282 843Z" transform="translate(208.2 741.6) scale(0.62 -0.62)" fill="#6f8fc2"/>
+  <rect x="740.2" y="236.3" width="88" height="88" fill="#5b9dff" stroke="#08111f" stroke-width="10"/>
+</svg>

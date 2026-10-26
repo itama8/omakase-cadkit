@@ -54,6 +54,28 @@ include those timings when reporting slow loads. The last three drawing payloads
 are retained in the browser and checked for file changes before reuse.
 These changes are not in the previously published `v0.1.0-alpha.1` ZIP.
 
+The empty screen's drawing is a button: it opens the system "open file" dialog for a
+DWG or DXF and loads the chosen drawing directly.
+
+### Windows installer in the next download
+
+The next Windows release adds `omakase-cadkit-<version>-win32-x64-setup.exe` next to
+the ZIP. It installs for the current user only (no administrator rights) into
+`%LOCALAPPDATA%\Programs\omakase-cadkit`, adds a Start menu entry (a desktop icon is
+optional), offers omakase-cadkit under **Open with** for `.dwg` and `.dxf` without
+replacing AutoCAD as the default, and registers an uninstaller under **Installed
+apps**. Installing over an older version stops a running viewer first.
+
+The installer and `omakase-cadkit.exe` are deliberately unsigned, so Windows SmartScreen
+may show "Windows protected your PC": choose **More info**, then **Run anyway**.
+
+Both the installer and the ZIP now start through `omakase-cadkit.exe`, which opens
+no console window. `launch.cmd` still works for command-line use. On Windows the
+DWG/DXF worker is built as a windowless program, so no terminal appears when a
+drawing opens. It is precompiled and starts when the viewer starts, rather than on
+the first drawing. The published alpha.1 ZIP showed a console for that worker, and
+closing that window stopped the worker, so the next drawing paid a full cold start.
+
 ## Set up a source checkout
 
 This route is for a person or an agent working on the code, or on a platform with

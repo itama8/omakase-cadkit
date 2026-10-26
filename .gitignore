@@ -2,6 +2,8 @@ node_modules/
 bin/sidecar/
 sidecar/bin/
 sidecar/obj/
+launcher/bin/
+launcher/obj/
 viewer/dist/
 fixtures/*.dxf
 fixtures/*.dwg

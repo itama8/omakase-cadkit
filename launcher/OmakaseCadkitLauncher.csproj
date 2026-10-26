@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- omakase-cadkit.exe for the Windows download and installer. .NET Framework 4.8 ships with
+       Windows 10 and 11, so this stays a few kilobytes instead of carrying a second runtime. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>omakase-cadkit</AssemblyName>
+    <RootNamespace>OmakaseCadkitLauncher</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <DebugType>none</DebugType>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <Product>omakase-cadkit</Product>
+    <Description>omakase-cadkit</Description>
+    <ApplicationIcon>..\assets\omakase-cadkit.ico</ApplicationIcon>
+  </PropertyGroup>
+</Project>

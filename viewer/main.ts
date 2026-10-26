@@ -602,6 +602,19 @@ async function chooseFolder() {
     $("#dir").innerHTML = `<li class="hint">${esc(err.message)}</li>`;
   } finally { button.disabled = false; }
 }
+async function chooseDrawing() {
+  const button = $<HTMLButtonElement>("#empty-open");
+  button.disabled = true;
+  try {
+    const res = await fetch(`/api/pick-drawing?dir=${encodeURIComponent(currentFolder || "~")}`, { method: "POST" });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error);
+    if (result.file) await open(result.file);
+  } catch (err: any) {
+    overlay(`Could not open the file picker: ${err.message ?? err}`, "error");
+  } finally { button.disabled = false; }
+}
+$("#empty-open").addEventListener("click", () => void chooseDrawing());
 $("#open-button").addEventListener("click", () => void chooseFolder());
 $("#browse-button").addEventListener("click", () => void chooseFolder());
 $("#folder-back").addEventListener("click", () => { if (parentFolder && parentFolder !== currentFolder) void browse(parentFolder); });

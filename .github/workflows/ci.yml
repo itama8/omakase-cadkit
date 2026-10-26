@@ -112,17 +112,42 @@ jobs:
           curl.exe -fsS --compressed "http://127.0.0.1:4289/api/lint?file=$doc" -o "$out\lint.json"
           if ($LASTEXITCODE -ne 0) { throw 'lint request failed' }
           if (-not (Select-String -Path "$out\lint.json" -Pattern 'sewer-levels' -Quiet)) { throw 'no sewer-levels finding' }
+      # The Windows installer is compiled by Inno Setup 6; install it if the image lacks it.
+      - name: Ensure Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
       # What testers download: the app with its Node and sidecar inside, so no tools are needed.
       - name: Build the download bundle
         run: npm run bundle
       # The archive is the artifact testers get: launch it, not just build it.
       - name: Launch from the bundle with no tools on PATH
         run: node scripts/check-bundle.mjs
+      # Install the way a tester would (per user, no admin), open a drawing, then uninstall.
+      - name: Install, launch and uninstall with the Windows installer
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $setup = Get-ChildItem dist-bundle\*-setup.exe | Select-Object -First 1
+          if (-not $setup) { throw 'no installer was built' }
+          $dir = Join-Path $env:RUNNER_TEMP 'omakase-cadkit-installed'
+          $p = Start-Process -Wait -PassThru -FilePath $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',"/DIR=`"$dir`""
+          if ($p.ExitCode -ne 0) { throw "installer exited $($p.ExitCode)" }
+          node scripts/check-bundle.mjs $dir
+          if ($LASTEXITCODE -ne 0) { throw 'installed app failed the launch check' }
+          $u = Start-Process -Wait -PassThru -FilePath "$dir\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+          if ($u.ExitCode -ne 0) { throw "uninstaller exited $($u.ExitCode)" }
+          # The uninstaller finishes from a temporary copy after its process exits.
+          for ($i = 0; $i -lt 30 -and (Test-Path "$dir\omakase-cadkit.exe"); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path "$dir\omakase-cadkit.exe") { throw 'uninstall left the app behind' }
       - name: Upload the download bundle
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: download-${{ matrix.os }}
-          path: dist-bundle/*.zip
+          path: |
+            dist-bundle/*.zip
+            dist-bundle/*-setup.exe
           if-no-files-found: error
           retention-days: 30
 
@@ -138,7 +163,7 @@ jobs:
         with:
           path: dist-bundle
           merge-multiple: true
-      - name: Upload each platform ZIP to the release
+      - name: Upload each platform ZIP and the Windows installer to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -147,4 +172,4 @@ jobs:
           gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
               --title "omakase-cadkit ${GITHUB_REF_NAME#v}" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" dist-bundle/*.zip --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$GITHUB_REF_NAME" dist-bundle/*.zip dist-bundle/*-setup.exe --repo "$GITHUB_REPOSITORY" --clobber

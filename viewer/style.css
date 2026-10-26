@@ -308,6 +308,8 @@ input[type="text"]::placeholder { color: var(--faint); }
   background: var(--accent-soft);
 }
 .brand-mark svg { width: 19px; height: 19px; }
+.brand-mark:has(img) { border: 0; background: none; }
+.brand-mark img { width: 34px; height: 34px; display: block; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.1; }
 .brand-name { font-weight: 600; font-size: var(--fs-body); letter-spacing: -0.01em; }
 .brand-sub {
@@ -994,7 +996,25 @@ body.left-hidden #ribbon-left, body.right-hidden #ribbon-right { display: flex; 
   padding: 24px;
   text-align: center;
 }
-.empty-art { width: 260px; max-width: 44vw; color: var(--faint); margin-bottom: 26px; }
+.empty-art { display: block; width: 260px; max-width: 44vw; color: var(--faint); }
+.empty-open {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 14px 14px 14px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.empty-open-label { padding: 6px 14px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: var(--fs-body); font-weight: 600; }
+.empty-open:hover, .empty-open:focus-visible { border-color: var(--accent-line); background: var(--accent-soft); }
+.empty-open:hover .empty-art, .empty-open:focus-visible .empty-art { color: var(--accent); }
+.empty-open:disabled { cursor: progress; opacity: 0.6; }
 .empty-art-label { font-family: var(--mono); font-size: 6.5px; letter-spacing: 0.12em; fill: currentColor; opacity: 0.8; }
 .empty h1 { color: var(--text); font-size: 22px; letter-spacing: -0.02em; }
 .empty-lead { margin: 8px 0 0; max-width: 440px; font-size: var(--fs-body); line-height: 1.55; }

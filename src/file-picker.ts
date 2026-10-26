@@ -55,3 +55,45 @@ end run`, folder], folder);
     }
   }
 }
+
+/** The system "open file" dialog limited to drawings; null when the person cancels. */
+export async function pickDrawing(folder: string): Promise<string | null> {
+  if (process.platform === "win32") {
+    const script = `
+Add-Type -AssemblyName System.Windows.Forms
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = 'Open a drawing'
+$dialog.Filter = 'Drawings (*.dwg;*.dxf)|*.dwg;*.dxf|All files (*.*)|*.*'
+$dialog.InitialDirectory = $env:OMAKASE_PICKER_FOLDER
+$dialog.CheckFileExists = $true
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+try {
+  if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Write($dialog.FileName) }
+} finally { $dialog.Dispose(); $owner.Dispose() }
+`;
+    const exe = path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+    return dialog(exe, ["-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], folder);
+  }
+  if (process.platform === "darwin") {
+    return dialog("/usr/bin/osascript", ["-e", `on run argv
+try
+return POSIX path of (choose file with prompt "Open a drawing" of type {"dwg", "dxf", "com.autodesk.dwg", "com.autodesk.dxf"} default location (POSIX file (item 1 of argv)))
+on error number -128
+return ""
+end try
+end run`, folder], folder);
+  }
+  try {
+    return await dialog("zenity", ["--file-selection", "--title=Open a drawing", "--file-filter=Drawings | *.dwg *.DWG *.dxf *.DXF", "--file-filter=All files | *", `--filename=${folder}${path.sep}`], folder, true);
+  } catch (err: any) {
+    if (err.code !== "ENOENT") throw err;
+    try {
+      return await dialog("kdialog", ["--getopenfilename", folder, "Drawings (*.dwg *.DWG *.dxf *.DXF)", "--title", "Open a drawing"], folder, true);
+    } catch (fallback: any) {
+      if (fallback.code === "ENOENT") throw new Error("A file picker needs Zenity or KDialog on this Linux desktop.");
+      throw fallback;
+    }
+  }
+}

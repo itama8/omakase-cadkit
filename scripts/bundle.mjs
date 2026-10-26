@@ -51,7 +51,9 @@ mkdirSync(stage, { recursive: true });
 run(process.execPath, [path.join(root, "node_modules/typescript/bin/tsc"), "-p", "tsconfig.build.json"]);
 const { build } = await import("esbuild");
 await build({ entryPoints: [path.join(root, "viewer/main.ts")], bundle: true, format: "esm", target: "es2022", outfile: path.join(root, "viewer/dist/viewer.js") });
-run(dotnet, ["publish", "sidecar", "-c", "Release", "-r", rid, "--self-contained", "true", "-p:PublishSingleFile=true", "-p:EnableCompressionInSingleFile=true", "-o", path.join(stage, "bin", "sidecar")]);
+// ReadyToRun and no single-file compression: every worker start would otherwise inflate the
+// runtime and JIT ACadSharp again, which a Windows tester saw as a very slow first open.
+run(dotnet, ["publish", "sidecar", "-c", "Release", "-r", rid, "--self-contained", "true", "-p:PublishSingleFile=true", "-p:PublishReadyToRun=true", "-o", path.join(stage, "bin", "sidecar")]);
 
 // The Node runtime: the one Setup downloaded, or this dev machine's as a fallback.
 const savedNode = path.join(root, ".tools", "node", "bin", win ? "node.exe" : "node");
@@ -68,6 +70,7 @@ copy("bin/drawkit.mjs");
 copy("dist");
 copy("viewer/index.html");
 copy("viewer/style.css");
+copy("viewer/favicon.svg");
 if (existsSync(path.join(root, "viewer/fonts"))) copy("viewer/fonts");
 copy("viewer/dist");
 copy("fixtures/omakase-cadkit.json");
@@ -80,17 +83,23 @@ copy("launch.command");
 copy("launch.cmd");
 copy("scripts/launch.mjs");
 copy("scripts/launch.ps1");
+// Windows gets omakase-cadkit.exe: the same launch without a console window, and the entry
+// the installer's Start menu shortcut and "Open with" point at.
+if (win) run(dotnet, ["build", "launcher", "-c", "Release", "-o", stage, "-p:Version=" + pkg.version.replace(/-.*/, "")]);
 
 // Downloading an unsigned ZIP can add a quarantine flag on macOS; say so before it bites.
 writeFileSync(path.join(stage, "START-HERE.txt"), `omakase-cadkit ${pkg.version} — alpha
 
 1. Keep this folder where you unzipped it. It contains everything the app needs.
-   No setup.cmd is needed: this download is already built.
-2. Launch: double-click ${win ? "launch.cmd" : "launch.command"}
+   No setup.cmd is needed: this download is already built.${win ? `
+   Prefer an installer? ${name}-setup.exe on the release page installs
+   the same app with a Start menu entry and "Open with" for drawings. Both are unsigned:
+   if Windows says "Windows protected your PC", choose More info, then Run anyway.` : ""}
+2. Launch: double-click ${win ? "omakase-cadkit.exe (or launch.cmd)" : "launch.command"}
    (macOS: if the system refuses to run it, right-click it and choose Open, or run
    "xattr -dr com.apple.quarantine ." once in this folder.)
-3. The viewer opens at http://127.0.0.1:4280/ — use the folder icon in the header or Files panel.
-   Choose a folder in the system picker, then click a drawing in the file list.
+3. The viewer opens at http://127.0.0.1:4280/ — click the drawing in the middle to pick a file,
+   or use the folder icon in the header or Files panel to choose a folder, then click a drawing.
    The curved back arrow returns to the parent folder. Or launch onto a drawing:
    ${win ? "launch.cmd" : "bash launch.command"} view "C:\\path\\to\\drawing.dwg"
 4. Sample drawings are in fixtures/. Try ${win ? "launch.cmd" : "bash launch.command"} lint fixtures${win ? "\\" : "/"}sewer_bad.dxf
@@ -114,3 +123,19 @@ if (win) {
 const mb = (file) => `${(statSync(file).size / 1e6).toFixed(0)} MB`;
 console.log(`bundle: ${path.relative(root, stage)}`);
 console.log(`archive: ${path.relative(root, zipPath)} (${mb(zipPath)})`);
+
+// The Windows installer: Inno Setup packs the same folder. CI must produce it; a local build
+// without Inno Setup still gets the ZIP.
+if (win) {
+  const iscc = [process.env.ISCC, path.join(process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Inno Setup 6", "ISCC.exe"), path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Inno Setup 6", "ISCC.exe"), process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "Inno Setup 6", "ISCC.exe")]
+    .filter(Boolean).find((candidate) => existsSync(candidate));
+  if (iscc) {
+    const setupName = `${name}-setup`;
+    run(iscc, ["/Qp", `/DAppVersion=${pkg.version}`, `/DNumericVersion=${pkg.version.replace(/-.*/, "")}`, `/DSourceDir=${stage}`, `/DOutputDir=${outDir}`, `/DOutputName=${setupName}`, path.join(root, "installer", "omakase-cadkit.iss")]);
+    console.log(`installer: ${path.relative(root, path.join(outDir, setupName + ".exe"))} (${mb(path.join(outDir, setupName + ".exe"))})`);
+  } else if (process.env.CI) {
+    throw new Error("Inno Setup 6 (ISCC.exe) is required to build the Windows installer in CI");
+  } else {
+    console.warn("warning: Inno Setup 6 not found; built the ZIP only. Install it from https://jrsoftware.org/isinfo.php or set ISCC.");
+  }
+}

@@ -30,6 +30,14 @@ Both are licensed under SIL OFL 1.1; their upstream license texts are preserved 
 [licenses/Arimo-OFL.txt](licenses/Arimo-OFL.txt) and
 [licenses/Tinos-OFL.txt](licenses/Tinos-OFL.txt).
 
+## Noto Sans JP (app icon)
+
+The app icon (`assets/`, `viewer/favicon.svg`, and the Windows launcher and installer)
+draws the outline of the 任 glyph from Noto Sans JP Medium, as used by Omakase's icon,
+with drafting marks added. Noto Sans JP is licensed under SIL OFL 1.1; the license text
+is preserved in [licenses/Noto-Sans-JP-OFL.txt](licenses/Noto-Sans-JP-OFL.txt). No font
+file is redistributed; `scripts/make-icon.mjs` embeds the single glyph outline.
+
 ## Toolchains and future distributions
 
 Node.js, .NET, uv, Python, ezdxf, TypeScript, esbuild, and optional renderers are

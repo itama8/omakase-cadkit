@@ -13,7 +13,7 @@ import { rasterCandidates, resolveRaster } from "./rasters.ts";
 import { buildStamp } from "./sidecar.ts";
 import { CACHE_DIR, DrawingStore, expandHome } from "./store.ts";
 import { resolveUnits } from "./sheet.ts";
-import { pickFolder } from "./file-picker.ts";
+import { pickDrawing, pickFolder } from "./file-picker.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const VIEWER = path.join(ROOT, "viewer");
@@ -43,7 +43,7 @@ function pushRecent(file: string) {
   writeFileSync(RECENT, JSON.stringify(list));
 }
 
-const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".map": "application/json", ".woff2": "font/woff2" };
+const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".map": "application/json", ".woff2": "font/woff2", ".svg": "image/svg+xml" };
 
 const BUILD = buildStamp();
 const fileParam = (url: URL) => {
@@ -146,13 +146,14 @@ export function startServer(port = 4280, host = "127.0.0.1") {
         return json(res, 200, n ?? { manholes: [], pipes: [] }, req);
       }
       if (url.pathname === "/api/recent") return json(res, 200, recent().filter((f) => existsSync(f)));
-      if (url.pathname === "/api/pick-folder") {
+      if (url.pathname === "/api/pick-folder" || url.pathname === "/api/pick-drawing") {
         if (req.method !== "POST") return json(res, 405, { error: "Use POST." });
-        if (req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: "Choose folders from this viewer." });
-        if (picking) return json(res, 409, { error: "A folder picker is already open." });
+        if (req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: "Choose from this viewer." });
+        if (picking) return json(res, 409, { error: "A picker is already open." });
         picking = true;
         try {
           const folder = expandHome(url.searchParams.get("dir") || "~");
+          if (url.pathname === "/api/pick-drawing") return json(res, 200, { file: await pickDrawing(folder) });
           return json(res, 200, { folder: await pickFolder(folder) });
         } finally { picking = false; }
       }
@@ -190,6 +191,9 @@ export function startServer(port = 4280, host = "127.0.0.1") {
   server.listen(port, host, () => {
     const address = server.address();
     console.log(`omakase-cadkit viewer on http://${host}:${typeof address === "object" && address ? address.port : port}/`);
+    // Start the sidecar while the person is still choosing a drawing, so the first open
+    // does not also pay for process and runtime start-up. A failure resurfaces on open.
+    store.sidecar.request("ping", {}, 60_000).catch(() => {});
   });
   const shutdown = () => {
     store.close();

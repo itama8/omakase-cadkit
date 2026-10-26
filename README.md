@@ -28,6 +28,9 @@ double-click `launch.cmd` on Windows or `launch.command` on macOS/Linux. The
 archive carries its own Node runtime and DWG/DXF sidecar, so nothing is installed
 and nothing is downloaded on first run. Builds exist for Linux x64, macOS Apple
 Silicon and Intel, and Windows x64; `START-HERE.txt` in the folder has the details.
+From the next release, Windows also gets a per-user installer (`…-win32-x64-setup.exe`)
+with a Start menu entry and **Open with** for drawings; see
+[Windows installer](docs/setup.md#windows-installer-in-the-next-download).
 See [installing a download](docs/setup.md#install-a-download) and, for what an
 alpha does not do yet, [trying an alpha](docs/setup.md#trying-an-alpha).
 

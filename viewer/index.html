@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>omakase-cadkit</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="preload" href="/fonts/ibm-plex-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/style.css" />
@@ -16,12 +17,6 @@
       </symbol>
       <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></symbol>
       <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></symbol>
-      <symbol id="i-mark" viewBox="0 0 24 24">
-        <path d="M3.5 3.5h17v17h-17z" fill="none" stroke="currentColor" stroke-width="1.4" />
-        <path d="M3.5 9h17M9 9v11.5" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".45" />
-        <circle cx="15.5" cy="15.5" r="2.6" fill="none" stroke="currentColor" stroke-width="1.4" />
-        <path d="M12.9 15.5h-4" stroke="currentColor" stroke-width="1.4" />
-      </symbol>
       <symbol id="i-panel-left" viewBox="0 0 24 24">
         <rect x="3.5" y="4.5" width="17" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" />
         <path d="M9.5 4.5v15" stroke="currentColor" stroke-width="1.5" />
@@ -95,7 +90,7 @@
 
     <header id="top">
       <a class="brand" href="/" aria-label="omakase-cadkit home" title="Start over with no drawing open">
-        <span class="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-mark" /></svg></span>
+        <span class="brand-mark"><img src="favicon.svg" alt="" /></span>
         <span class="brand-text"><span class="brand-name">omakase cadkit</span><span class="brand-sub">drawing review</span></span>
       </a>
       <div id="doc-title">
@@ -235,6 +230,7 @@
       </section>
 
       <div id="empty" class="empty">
+        <button id="empty-open" type="button" class="empty-open" title="Open a drawing (DWG or DXF)" aria-label="Open a drawing">
         <svg class="empty-art" viewBox="0 0 260 150" aria-hidden="true">
           <rect x="1" y="1" width="258" height="148" rx="6" fill="none" stroke="currentColor" stroke-width="1" opacity=".25" />
           <rect x="26" y="18" width="208" height="114" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".5" />
@@ -247,8 +243,10 @@
           <text x="34" y="40" class="empty-art-label">DRAWING 3 / SEWER NETWORK</text>
           <text x="204" y="126" class="empty-art-label" text-anchor="end">1:500 · A1</text>
         </svg>
+        <span class="empty-open-label">Choose a DWG or DXF file…</span>
+        </button>
         <h1>Open a drawing</h1>
-        <p class="empty-lead">Choose a folder with the folder button next to the title, then select a drawing. Recent drawings are under <b>Files</b>.</p>
+        <p class="empty-lead">Or choose a folder with the folder button next to the title and pick from its list. Recent drawings are under <b>Files</b>.</p>
         <div class="empty-keys">
           <span><kbd>F</kbd> fit sheet</span>
           <span><kbd>wheel</kbd> zoom</span>

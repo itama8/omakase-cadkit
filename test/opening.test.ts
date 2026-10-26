@@ -4,7 +4,9 @@ import { once } from "node:events";
 import { copyFileSync, mkdtempSync, rmSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createServer } from "node:net";
 import { test } from "node:test";
+import { main } from "../src/cli.ts";
 
 test("drawing revalidation skips payload transfer, detects edits, and browses folders", { timeout: 30000 }, async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "cadkit-opening-"));
@@ -49,11 +51,37 @@ test("drawing revalidation skips payload transfer, detects edits, and browses fo
     assert.equal(last.dir, dir);
     assert.equal((await fetch(`${base}/api/pick-folder`, { method: "POST", headers: { Origin: "https://unrelated.example" } })).status, 403);
     assert.equal((await fetch(`${base}/api/pick-folder`)).status, 405);
+    assert.equal((await fetch(`${base}/api/pick-drawing`, { method: "POST", headers: { Origin: "https://unrelated.example" } })).status, 403);
+    assert.equal((await fetch(`${base}/api/pick-drawing`)).status, 405);
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
       child.kill();
       await once(child, "exit");
     }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("stop ends a running viewer server so an installer can replace its files", { timeout: 30000 }, async () => {
+  const free = createServer().listen(0, "127.0.0.1");
+  await once(free, "listening");
+  const port = (free.address() as { port: number }).port;
+  free.close();
+  const dir = mkdtempSync(path.join(tmpdir(), "cadkit-stop-"));
+  const child = spawn(process.execPath, ["src/server.ts", "--port", String(port)], {
+    stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, OMAKASE_CADKIT_CACHE: path.join(dir, "cache") },
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      child.stdout.on("data", (chunk) => String(chunk).includes("viewer on") && resolve());
+      child.once("exit", (code) => reject(new Error(`Server exited ${code}`)));
+    });
+    const exited = once(child, "exit");
+    assert.equal(await main(["stop", "--port", String(port)]), 0);
+    await exited;
+    assert.equal(await main(["stop", "--port", String(port)]), 0, "stopping with nothing running is not an error");
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
     rmSync(dir, { recursive: true, force: true });
   }
 });

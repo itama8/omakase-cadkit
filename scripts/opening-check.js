@@ -91,9 +91,33 @@
     await cadkit.open(file);
     await wait(100);
     assert(browsed === 'E:/', 'a drawing at a drive root must retain the root slash');
+    // The empty screen's drawing is a button for the system "open file" dialog. Only the
+    // native result is stubbed; the chosen file then loads through the real server.
+    let drawingPicks = 0;
+    let chosen = file;
+    window.fetch = async (...args) => {
+      const url = String(args[0]);
+      if (url.startsWith('/api/pick-drawing')) {
+        drawingPicks++;
+        assert(args[1].method === 'POST', 'drawing picker must use POST');
+        return new Response(JSON.stringify({ file: chosen }));
+      }
+      return originalFetch(...args);
+    };
+    const emptyOpen = document.querySelector('#empty #empty-open');
+    assert(emptyOpen && emptyOpen.tagName === 'BUTTON' && emptyOpen.querySelector('svg.empty-art'), 'the empty-screen drawing must be an open button');
+    await cadkit.open('/no/such/drawing.dwg');
+    assert(!document.querySelector('#empty').classList.contains('hidden'), 'a failed open must bring the empty screen back');
+    emptyOpen.click();
+    for (let i = 0; i < 100 && !(cadkit.state().file === file && document.querySelector('#overlay').classList.contains('hidden')); i++) await wait(100);
+    assert(drawingPicks === 1 && cadkit.state().file === file && document.querySelector('#empty').classList.contains('hidden'), 'the open button must load the chosen drawing');
+    chosen = null;
+    emptyOpen.click();
+    await wait(100);
+    assert(drawingPicks === 2 && cadkit.state().file === file && !emptyOpen.disabled, 'cancelling the drawing picker must keep the open drawing and restore the button');
     window.fetch = originalFetch;
     await cadkit.open(file);
     document.querySelector('[data-tab="files"]').click();
-    return { statuses, feedback: 'elapsed and completion timing checked', folders: 'folder selection, cancel, parent navigation, panel crosses and Windows paths checked' };
+    return { statuses, feedback: 'elapsed and completion timing checked', folders: 'folder selection, cancel, parent navigation, panel crosses and Windows paths checked', open: 'empty-screen open button, picked drawing and cancel checked' };
   } finally { window.fetch = originalFetch; }
 })()

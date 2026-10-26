@@ -1,5 +1,6 @@
 // Launches the built download bundle the way a tester does, with no Node or .NET on PATH,
-// then asks its private server for health and a lint result. Run after `npm run bundle`.
+// then asks its private server for health and a lint result. Run after `npm run bundle`, or
+// pass a folder (an installed Windows app) to check that instead.
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,8 +10,9 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const out = path.join(root, "dist-bundle");
 const entry = existsSync(out) ? readdirSync(out, { withFileTypes: true }).find((e) => e.isDirectory() && e.name.startsWith("omakase-cadkit-")) : null;
-if (!entry) throw new Error("no bundle in dist-bundle/: run `npm run bundle` first");
-const bundle = path.join(out, entry.name);
+if (!entry && !process.argv[2]) throw new Error("no bundle in dist-bundle/: run `npm run bundle` first");
+const bundle = process.argv[2] ? path.resolve(process.argv[2]) : path.join(out, entry.name);
+const label = process.argv[2] ? bundle : entry.name;
 const win = process.platform === "win32";
 const port = 4290;
 const home = mkdtempSync(path.join(tmpdir(), "omakase-cadkit-bundle-"));
@@ -22,9 +24,16 @@ if (!existsSync(fixture)) throw new Error(`no ${path.relative(root, fixture)} in
 const env = win
   ? { ...process.env, HOME: home, USERPROFILE: home }
   : { HOME: home, PATH: "/usr/bin:/bin" };
+// On Windows the console-free omakase-cadkit.exe is what people double-click; CI keeps it
+// from opening an error dialog.
+const viewArgs = ["view", fixture, "--no-open", "--port", String(port)];
+const exe = path.join(bundle, "omakase-cadkit.exe");
 const launcher = win
-  ? spawn("cmd.exe", ["/c", "launch.cmd", "view", fixture, "--no-open", "--port", String(port)], { cwd: bundle, env, stdio: ["ignore", "pipe", "pipe"] })
-  : spawn("bash", ["launch.command", "view", fixture, "--no-open", "--port", String(port)], { cwd: bundle, env, stdio: ["ignore", "pipe", "pipe"] });
+  ? existsSync(exe)
+    ? spawn(exe, viewArgs, { cwd: bundle, env: { ...env, CI: "1" }, stdio: ["ignore", "pipe", "pipe"] })
+    : spawn("cmd.exe", ["/c", "launch.cmd", ...viewArgs], { cwd: bundle, env, stdio: ["ignore", "pipe", "pipe"] })
+  : spawn("bash", ["launch.command", ...viewArgs], { cwd: bundle, env, stdio: ["ignore", "pipe", "pipe"] });
+const via = win && existsSync(exe) ? "omakase-cadkit.exe" : win ? "launch.cmd" : "launch.command";
 
 let output = "";
 for (const stream of [launcher.stdout, launcher.stderr]) stream.on("data", (chunk) => { output += chunk; });
@@ -46,7 +55,7 @@ try {
   const lint = await fetch(`${base}/api/lint?file=${encodeURIComponent(fixture)}`, { signal: AbortSignal.timeout(60_000) }).then((r) => r.json());
   const findings = lint.findings ?? [];
   if (!findings.some((f) => f.rule === "sewer-levels")) throw new Error(`bundle lint returned no sewer-levels finding (${findings.length} findings)`);
-  console.log(`Bundle ${entry.name}: launched with ${win ? "system" : "no"} PATH, ${findings.length} findings, sidecar ${health.build}.`);
+  console.log(`Bundle ${label}: launched through ${via} with ${win ? "system" : "no"} PATH, ${findings.length} findings, sidecar ${health.build}.`);
 } finally {
   try { process.kill(health.pid); } catch {}
   rmSync(home, { recursive: true, force: true });

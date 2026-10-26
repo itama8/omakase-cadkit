@@ -31,6 +31,7 @@ usage:
   omakase-cadkit view [file] [--handle H] [--no-open] open in the browser viewer (starts the server;
                                                opens a browser when run from a terminal)
   omakase-cadkit serve [--port 4280]                  run the viewer server
+  omakase-cadkit stop [--port 4280]                   stop a running viewer server and its sidecar
   omakase-cadkit rules                                list lint rules
 
 options:
@@ -338,6 +339,18 @@ async function cmdView(file: string | undefined, flags: Flags) {
   if (flags["no-open"] ? false : flags.open ? true : process.stdout.isTTY) openBrowser(href);
 }
 
+async function cmdStop(flags: Flags) {
+  const port = Number(str(flags, "port") ?? process.env.OMAKASE_CADKIT_PORT ?? process.env.DRAWKIT_PORT ?? 4280);
+  const up = await health(port);
+  if (up?.app !== "omakase-cadkit" || !up.pid) return console.log(`no omakase-cadkit viewer on port ${port}`);
+  try {
+    process.kill(up.pid, "SIGTERM");
+  } catch {}
+  for (let i = 0; i < 50 && (await health(port)); i++) await new Promise((r) => setTimeout(r, 100));
+  if (await health(port)) throw new Error(`the viewer server on port ${port} (pid ${up.pid}) did not stop`);
+  console.log(`stopped the viewer on port ${port}`);
+}
+
 function cmdRules(flags: Flags) {
   const all = [...RULES.map((r) => ({ id: r.id, pack: r.pack, title: r.title, why: r.why })), ...SET_RULES.map((r) => ({ id: r.id, pack: r.pack, title: r.title + " (across files)", why: r.why }))];
   if (flags.json) return console.log(JSON.stringify(all, null, 2));
@@ -358,6 +371,10 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "serve") {
     await import("./server.ts").then((m) => m.startServer(Number(str(flags, "port") ?? 4280)));
     return -1; // keep running
+  }
+  if (cmd === "stop") {
+    await cmdStop(flags);
+    return 0;
   }
   if (cmd === "rules") {
     cmdRules(flags);
