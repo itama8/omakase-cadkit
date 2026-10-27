@@ -1,7 +1,7 @@
 # Outcomes
 
 What the project is working toward, and the next step for each. Details and evidence
-are in the linked devlogs. Updated 2026-10-27.
+are in the linked devlogs. Updated 2026-10-28.
 
 **States:** `queued` → `active` → `verifying` → `done`; also `partial` and `later`.
 `done` means the evidence was seen, and only on the platforms named.
@@ -10,9 +10,9 @@ are in the linked devlogs. Updated 2026-10-27.
 
 | ID | Outcome | State | Next step |
 |---|---|---|---|
-| O11 | A tester installs one download and uses the app with nothing else installed. | verifying | Publish the `v0.1.0-alpha.2` draft release ([s04](../.devlog/2026-10-27-s04.md)); the tester installs it and opens 3–8 MB drawings A → B → A, noting any window and the load timings. CI already builds, installs, launches and uninstalls it ([s03](../.devlog/2026-10-27-s03.md)). |
+| O11 | A tester installs one download and uses the app with nothing else installed. | verifying | Verify the updater on Windows through two new versions ([s05](../.devlog/2026-10-27-s05.md)); existing alpha.2 downloads need a manual upgrade first. Retain the tester’s 3–8 MB drawing A → B → A timings/window check ([s04](../.devlog/2026-10-27-s04.md)). |
 | O10 | A drafter reading a finding knows what is wrong, how to fix it in AutoCAD, and can tune the checks. | partial | Turn rules on/off, change severity and accept findings from the GUI ([s04](../.devlog/2026-10-26-s04.md)). |
-| O6 | Pan, zoom and selection feel instant on heavy drawings. | active | Retest quicker cold/warm opening on desktop and finish high-DPI hatch redraw ([s09](../.devlog/2026-10-27-s09.md)). |
+| O6 | Pan, zoom and selection feel instant on heavy drawings. | active | Desktop repaint accepted, including a 14.1 MB drawing ([s01](../.devlog/2026-10-28-s01.md)); reduce remaining fresh high-scale redraw and large reopen/image-arrival latency. |
 | O5 | Reviewers can trust what is drawn and found on a wider set of drawings. | partial | Review the newly drawn details in the viewer; plot styles, exact fonts and layouts remain ([s10](../.devlog/2026-10-26-s10.md)). |
 
 ## Next

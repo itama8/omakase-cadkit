@@ -100,6 +100,12 @@
         </button>
       </div>
       <div class="head-right">
+        <div id="update" class="update" hidden>
+          <span id="update-text"></span>
+          <button id="update-install" type="button" class="update-action" hidden>Install and restart</button>
+          <a id="update-link" class="update-action" target="_blank" rel="noopener" hidden>Download</a>
+          <button id="update-dismiss" type="button" class="icon-btn" title="Not now: hide until the next version" aria-label="Hide this update">✕</button>
+        </div>
         <div class="head-actions">
           <button id="properties-button" class="icon-btn" title="Drawing properties: set the units for drawings in this folder" aria-label="Drawing properties" disabled>
             <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-properties" /></svg>

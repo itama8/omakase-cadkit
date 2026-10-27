@@ -136,6 +136,8 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "installer exited $($p.ExitCode)" }
           node scripts/check-bundle.mjs $dir
           if ($LASTEXITCODE -ne 0) { throw 'installed app failed the launch check' }
+          node scripts/check-update-install.mjs $setup.FullName $dir
+          if ($LASTEXITCODE -ne 0) { throw 'installed app failed the update restart check' }
           $u = Start-Process -Wait -PassThru -FilePath "$dir\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
           if ($u.ExitCode -ne 0) { throw "uninstaller exited $($u.ExitCode)" }
           # The uninstaller finishes from a temporary copy after its process exits.

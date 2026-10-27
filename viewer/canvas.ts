@@ -7,6 +7,7 @@
 // fading out below 3 px and skipped below 1.5 px.
 
 import type { Bbox, Drawing, Finding, Prim, Raster } from "../src/types.ts";
+import { StrokePool, type StrokeJob } from "./stroke-pool.ts";
 
 export interface Theme {
   bg: string;
@@ -44,9 +45,10 @@ interface Batch {
   dash?: number;
   path: Path2D;
   /** Spatial pieces of disconnected hatch strokes, kept inside the original batch order. */
-  parts?: Map<number, { bbox: Bbox; path: Path2D }>;
+  parts?: Map<number, { bbox: Bbox; path: Path2D; segments: number }>;
   maxSize: number; // upper bound on primitive size in this batch; enables subpixel culling
   dots: number[];
+  sources?: number[];
 }
 
 interface Tile {
@@ -71,11 +73,20 @@ interface PreparedDrawing {
 }
 
 /** Raster tiles rendered at one scale, in drawing pixels at that scale (x right, y down). */
+interface RasterFrame { bitmap: ImageBitmap; left: number; top: number }
+
 interface RasterLayer {
+  key: string;
   scale: number;
   originX: number;
   originY: number;
   tiles: Map<string, RasterTile>;
+  /** A new scale is prepared offscreen until its whole visible region is ready. */
+  staging?: boolean;
+  strokes?: Set<string>;
+  strokeFrame?: RasterFrame;
+  strokeJob?: boolean;
+  background?: RasterFrame;
 }
 
 export interface RasterOverlay extends Raster {
@@ -144,6 +155,10 @@ export class DrawingCanvas {
   drawing: Drawing | null = null;
   private tiles: Tile[] = [];
   private preparedDrawings = new Map<Drawing, PreparedDrawing>();
+  private strokePool: StrokePool | null = null;
+  private strokePoolKey = "";
+  private strokePoolDrawing: Drawing | null = null;
+  private get activeStrokePool() { return this.strokePoolDrawing === this.drawing ? this.strokePool : null; }
   private primBox: Float64Array = new Float64Array(0); // 4 per prim, relative coords
   private entPrims: number[][] = [];
   private hitGrid = new Map<string, number[]>();
@@ -164,8 +179,10 @@ export class DrawingCanvas {
   private zoomMotion: { x: number; y: number; scale: number; time: number } | null = null;
   /** Tiles being drawn at (or stretched towards) the current scale. */
   private front: RasterLayer | null = null;
-  /** The previous front, stretched underneath while the new one fills in. */
+  /** The previous complete scale, stretched while its replacement is prepared. */
   private back: RasterLayer | null = null;
+  /** Recently completed scales, newest last. All belong to sceneKey. */
+  private recentLayers: RasterLayer[] = [];
   /** The whole drawing at low resolution, under both, so zooming out never shows blank. */
   private overview: { key: string; scale: number; left: number; top: number; canvas: HTMLCanvasElement } | null = null;
   private overviewIdle = 0;
@@ -203,6 +220,9 @@ export class DrawingCanvas {
     return this.canvas.height / this.dpr;
   }
 
+  /** Tile steps must be whole device pixels, including at fractional display scales. */
+  private get rasterSize() { return Math.round(RASTER_SIZE * this.dpr) / this.dpr; }
+
   // ------------------------------------------------------------------ loading
 
   /** Reuse is opt-in for payload objects revalidated by the host. The default
@@ -211,6 +231,7 @@ export class DrawingCanvas {
     this.dropLayer(this.front);
     this.dropLayer(this.back);
     this.front = this.back = null;
+    this.clearRecentLayers();
     this.drawingVersion++;
     this.drawing = d;
     this.images = [];
@@ -243,6 +264,9 @@ export class DrawingCanvas {
     this.preparedDrawings.delete(d);
     this.preparedDrawings.set(d, { theme, tiles: this.tiles, primBox: this.primBox, entPrims: this.entPrims, hitGrid: this.hitGrid, hitCell: this.hitCell, extents: this.extents });
     while (this.preparedDrawings.size > 2) this.preparedDrawings.delete(this.preparedDrawings.keys().next().value!);
+    if ((d.prims.length > 100_000 || this.strokePoolDrawing === d) && this.strokePool && !this.strokePool.matches(d, this.extents, this.theme)) {
+      this.strokePool.dispose(); this.strokePool = null; this.strokePoolKey = ""; this.strokePoolDrawing = null;
+    }
     this.fit();
   }
 
@@ -254,6 +278,7 @@ export class DrawingCanvas {
 
   setImages(images: RasterOverlay[]) {
     this.images = images;
+    void this.activeStrokePool?.setImages(images);
     this.drawingVersion++;
     this.request();
   }
@@ -324,6 +349,7 @@ export class DrawingCanvas {
         batchMaps[t].set(key, batch);
         tile.batches.push(batch);
       }
+      if (kind === "stroke") (batch.sources ??= []).push(i);
       if (p[0] === "l") {
         // A hatch can span the sheet with thousands of disconnected strokes. Replaying
         // its whole path for every raster tile makes both opening and sharpening stall.
@@ -334,18 +360,63 @@ export class DrawingCanvas {
           const bbox: Bbox = [Math.min(f[j], f[j + 2]), Math.min(f[j + 1], f[j + 3]), Math.max(f[j], f[j + 2]), Math.max(f[j + 1], f[j + 3])];
           const id = tileIdx(bbox);
           let part = parts.get(id);
-          if (!part) { part = { bbox, path: new Path2D() }; parts.set(id, part); }
+          if (!part) { part = { bbox, path: new Path2D(), segments: 0 }; parts.set(id, part); }
           else for (let k = 0; k < 2; k++) {
             part.bbox[k] = Math.min(part.bbox[k], bbox[k]);
             part.bbox[k + 2] = Math.max(part.bbox[k + 2], bbox[k + 2]);
           }
           part.path.moveTo(f[j], f[j + 1]);
           part.path.lineTo(f[j + 2], f[j + 3]);
+          part.segments++;
         }
       } else if (p[0] === "d") batch.dots.push(p[4], p[5]);
       else addPrimToPath(batch.path, p);
     });
     this.tiles = tiles.filter((t) => t.batches.length || t.texts.length);
+  }
+
+  /** Worker entry point: compile exactly the same paths without a DOM canvas,
+   * hit index, fonts, images or UI lifecycle. */
+  static strokeRenderer(drawing: Drawing, boxes: Float64Array, extents: Bbox, theme: Theme) {
+    const view = Object.create(DrawingCanvas.prototype) as DrawingCanvas;
+    view.drawing = drawing; view.primBox = boxes; view.extents = extents;
+    view.currentTheme = theme; view.buildTiles();
+    // Only compiled paths and dash patterns are needed for subsequent jobs.
+    view.drawing = { ...drawing, prims: [] };
+    view.primBox = new Float64Array(0);
+    const transform = (ctx: CanvasRenderingContext2D, job: StrokeJob) => {
+      view.hiddenLayers = new Set(job.hidden);
+      ctx.setTransform(job.dpr * job.scale, 0, 0, -job.dpr * job.scale, -job.dpr * job.left, -job.dpr * job.top);
+      ctx.lineJoin = "bevel"; ctx.lineCap = "butt";
+      return [job.left / job.scale, -(job.top + job.height) / job.scale, (job.left + job.width) / job.scale, -job.top / job.scale];
+    };
+    return {
+      strokes(ctx: CanvasRenderingContext2D, job: StrokeJob) { view.paintStrokes(ctx, job.scale, transform(ctx, job)); },
+      images(ctx: CanvasRenderingContext2D, job: StrokeJob, images: RasterOverlay[]) {
+        view.images = images; view.imagesVisible = true;
+        view.drawImages(ctx, transform(ctx, job));
+      },
+    };
+  }
+
+  private paintStrokes(ctx: CanvasRenderingContext2D, s: number, vis: number[]) {
+    const onScreen = (b: ArrayLike<number>) => b[0] <= vis[2] && b[2] >= vis[0] && b[1] <= vis[3] && b[3] >= vis[1];
+    for (const t of this.tiles) {
+      if (!onScreen(t.bbox)) continue;
+      for (const b of t.batches) {
+        if (b.kind !== "stroke" || this.hiddenLayers.has(b.layer) || b.maxSize * s < 0.75) continue;
+        ctx.strokeStyle = b.color; ctx.lineWidth = 1 / s;
+        const pattern = b.dash === undefined ? undefined : this.drawing!.dashes?.[b.dash];
+        const dashed = !!pattern && pattern.reduce((a, v) => a + v, 0) * s >= 3;
+        if (dashed) ctx.setLineDash(pattern!.map((v) => v > 0 ? v : 1 / s));
+        if (b.parts) {
+          const path = new Path2D(b.path);
+          for (const part of b.parts.values()) if (onScreen(part.bbox)) path.addPath(part.path);
+          ctx.stroke(path);
+        } else ctx.stroke(b.path);
+        if (dashed) ctx.setLineDash([]);
+      }
+    }
   }
 
   private buildHitGrid() {
@@ -428,9 +499,9 @@ export class DrawingCanvas {
     this.zoomMotion = null;
   }
 
-  private applyZoom(sx: number, sy: number, factor: number) {
+  private applyZoom(sx: number, sy: number, factor: number, exactScale?: number) {
     const [x, y] = this.screenToRel(sx, sy);
-    this.scale = Math.max(1e-7, Math.min(1e7, this.scale * factor));
+    this.scale = Math.max(1e-7, Math.min(1e7, exactScale ?? this.scale * factor));
     // keep the point under the cursor fixed
     this.cx = x - (sx - this.width / 2) / this.scale;
     this.cy = y + (sy - this.height / 2) / this.scale;
@@ -504,7 +575,7 @@ export class DrawingCanvas {
         const remaining = Math.log(motion.scale / this.scale);
         const done = Math.abs(remaining) < 0.001;
         const fraction = 1 - Math.exp(-Math.max(1, now - motion.time) / 25);
-        this.applyZoom(motion.x, motion.y, done ? motion.scale / this.scale : Math.exp(remaining * fraction));
+        this.applyZoom(motion.x, motion.y, done ? motion.scale / this.scale : Math.exp(remaining * fraction), done ? motion.scale : undefined);
         motion.time = now;
         if (done) this.zoomMotion = null;
       }
@@ -514,7 +585,7 @@ export class DrawingCanvas {
     this.raf = document.hidden ? window.setTimeout(run, 16) : requestAnimationFrame(run);
   }
 
-  /** `progressive` spreads a re-render over frames when a stretched stand-in can cover the gaps. */
+  /** `progressive` prepares a replacement over frames while displaying the completed stand-in. */
   draw(progressive = false) {
     const t0 = performance.now();
     const ctx = this.ctx;
@@ -531,10 +602,11 @@ export class DrawingCanvas {
 
     // Raster tiles are anchored to drawing space at one scale, so pans render only newly
     // exposed tiles. While the wheel is moving, the cached tiles are stretched instead of
-    // re-rendered; once it settles a new layer fills in over the stretched old one.
+    // re-rendered; once it settles a complete new layer replaces the stretched old one.
     const now = performance.now();
     const key = `${this.drawingVersion}|${this.dpr}|${[...this.hiddenLayers].sort().join(",")}|${[...this.selected].join(",")}|${JSON.stringify(theme)}`;
     if (key !== this.sceneKey) {
+      this.clearRecentLayers();
       // Images can finish loading during a wheel gesture. Keep the displayed
       // frame as a stand-in instead of forcing a synchronous full redraw then.
       if (this.front?.tiles.size) {
@@ -546,25 +618,75 @@ export class DrawingCanvas {
     }
     const zooming = this.zoomMotion !== null || now - this.zoomInputAt < ZOOM_SETTLE_MS;
     // Nothing is rendered at intermediate scales: tiles drawn mid-gesture are stale a few frames later.
-    if (!this.front || (!zooming && s !== this.front.scale)) {
+    const prepareTarget = !!this.activeStrokePool && !this.activeStrokePool.failed && this.zoomMotion && now - this.zoomInputAt >= ZOOM_SETTLE_MS;
+    const targetScale = prepareTarget ? this.zoomMotion!.scale : s;
+    if (!this.front || ((!zooming || prepareTarget) && targetScale !== this.front.scale)) {
+      // Navigation often returns to an exact earlier scale. Reuse its pixels,
+      // not just its geometry; keep roundoff from an inverse zoom insignificant.
+      const sameScale = (layer: RasterLayer) => Math.abs(layer.scale / targetScale - 1) < 1e-12;
+      let reused: RasterLayer | undefined;
+      if (this.back?.key === key && sameScale(this.back)) {
+        reused = this.back; this.back = null;
+      } else {
+        const index = this.recentLayers.findIndex(sameScale);
+        if (index >= 0) [reused] = this.recentLayers.splice(index, 1);
+      }
       // A front still filling in is a worse stand-in than the complete layer beneath it.
-      if (this.front?.tiles.size && !(this.pending && this.back)) {
-        this.dropLayer(this.back);
+      if (this.front?.tiles.size && !this.front.staging) {
+        this.retainLayer(this.back);
         this.back = this.front;
       } else this.dropLayer(this.front);
       // Align the new grid to the viewport so a fresh fit/zoom keeps text sharp.
-      this.front = { scale: s, originX: this.cx * s - this.width / 2, originY: -this.cy * s - this.height / 2, tiles: new Map() };
+      const [ax, ay] = prepareTarget ? this.screenToRel(this.zoomMotion!.x, this.zoomMotion!.y) : [0, 0];
+      const targetX = prepareTarget ? ax * targetScale - this.zoomMotion!.x : this.cx * s - this.width / 2;
+      const targetY = prepareTarget ? -ay * targetScale - this.zoomMotion!.y : -this.cy * s - this.height / 2;
+      this.front = reused ?? { key, scale: targetScale, originX: targetX, originY: targetY, tiles: new Map() };
+      this.front.scale = targetScale;
+      this.front.staging = !!this.back;
     }
     const budget = zooming && (this.front.tiles.size || this.back?.tiles.size) ? 0 : progressive && this.back ? RENDER_BUDGET_MS : Infinity;
+    if (!zooming && this.front.scale === s) {
+      const left = this.cx * s - this.width / 2, top = -this.cy * s - this.height / 2;
+      // The cursor-anchor calculation and easing can differ by a rounding bit.
+      // Snap an otherwise identical predicted origin instead of adding a row of
+      // tiles for a 1e-13 pixel sliver at the viewport edge.
+      if (Math.abs(this.front.originX - left) < 1e-7) this.front.originX = left;
+      if (Math.abs(this.front.originY - top) < 1e-7) this.front.originY = top;
+    }
+    // Large stroke batches take longer than a frame even when tile commands
+    // themselves return quickly. Compile a bounded pool alongside the first frame;
+    // synchronous draws and unsupported browsers retain the original path.
+    const poolKey = JSON.stringify(theme);
+    if (this.dpr > 1 && d.prims.length > 100_000 && typeof Worker !== "undefined" && typeof OffscreenCanvas !== "undefined" && poolKey !== this.strokePoolKey) {
+      this.strokePool?.dispose();
+      this.strokePoolKey = poolKey;
+      const groups = this.tiles.flatMap(t => t.batches.filter(b => b.kind === "stroke").map(b => ({ sources: b.sources!, cost: [...b.parts?.values() ?? []].reduce((n, p) => n + p.segments, b.sources!.length) })));
+      this.strokePool = new StrokePool(d, this.primBox, this.extents, theme, groups, () => this.request());
+      this.strokePoolDrawing = d;
+      void this.strokePool.setImages(this.images);
+    }
+    if (prepareTarget || (budget > 0 && budget !== Infinity)) this.queueStrokes(this.front);
     if (budget !== Infinity && this.gaps(this.front)) {
       this.paintOverview(ctx);
       if (this.back) this.paintLayer(ctx, this.back, 0);
     }
-    const missing = this.paintLayer(ctx, this.front, budget);
+    const staging = progressive && this.front.staging;
+    const missing = this.paintLayer(ctx, this.front, budget, !staging);
+    if (!missing) {
+      // Build within the same budget, then publish all sharp tiles together.
+      // A partial new scale never replaces patches of the stretched stand-in.
+      if (staging) this.paintLayer(ctx, this.front, 0);
+      this.front.staging = false;
+    }
     this.pending = missing > 0 && budget > 0;
     if (!missing && !zooming) {
-      this.dropLayer(this.back);
+      this.retainLayer(this.back);
       this.back = null;
+      if (!this.front.strokeJob) {
+        this.front.strokeFrame?.bitmap.close(); this.front.strokeFrame = undefined;
+        this.front.background?.bitmap.close(); this.front.background = undefined;
+        this.front.strokes?.clear();
+      }
     }
     if (!zooming && !this.pending && this.overview?.key !== this.overviewKey()) this.scheduleOverview();
     window.clearTimeout(this.settleTimer);
@@ -579,8 +701,8 @@ export class DrawingCanvas {
   private gaps(layer: RasterLayer): number {
     const k = this.scale / layer.scale;
     const left = this.cx * layer.scale - this.width / 2 / k, top = -this.cy * layer.scale - this.height / 2 / k;
-    const x0 = Math.floor((left - layer.originX) / RASTER_SIZE), x1 = Math.ceil((left - layer.originX + this.width / k) / RASTER_SIZE) - 1;
-    const y0 = Math.floor((top - layer.originY) / RASTER_SIZE), y1 = Math.ceil((top - layer.originY + this.height / k) / RASTER_SIZE) - 1;
+    const x0 = Math.floor((left - layer.originX) / this.rasterSize), x1 = Math.ceil((left - layer.originX + this.width / k) / this.rasterSize) - 1;
+    const y0 = Math.floor((top - layer.originY) / this.rasterSize), y1 = Math.ceil((top - layer.originY + this.height / k) / this.rasterSize) - 1;
     let cached = 0;
     for (const id of layer.tiles.keys()) {
       const [x, y] = id.split(",").map(Number);
@@ -621,13 +743,14 @@ export class DrawingCanvas {
   }
 
   /** Composite a layer's tiles over the viewport, rendering missing ones for up to `budget` ms (at least one tile when positive). Returns how many are still missing. */
-  private paintLayer(ctx: CanvasRenderingContext2D, layer: RasterLayer, budget: number): number {
+  private paintLayer(ctx: CanvasRenderingContext2D, layer: RasterLayer, budget: number, present = true): number {
+    if (budget === 0 && !present) return this.gaps(layer);
     const deadline = performance.now() + budget;
     const k = this.scale / layer.scale;
     // viewport origin in the layer's pixel space
     const left = this.cx * layer.scale - this.width / 2 / k, top = -this.cy * layer.scale - this.height / 2 / k;
-    const x0 = Math.floor((left - layer.originX) / RASTER_SIZE), x1 = Math.ceil((left - layer.originX + this.width / k) / RASTER_SIZE) - 1;
-    const y0 = Math.floor((top - layer.originY) / RASTER_SIZE), y1 = Math.ceil((top - layer.originY + this.height / k) / RASTER_SIZE) - 1;
+    const x0 = Math.floor((left - layer.originX) / this.rasterSize), x1 = Math.ceil((left - layer.originX + this.width / k) / this.rasterSize) - 1;
+    const y0 = Math.floor((top - layer.originY) / this.rasterSize), y1 = Math.ceil((top - layer.originY + this.height / k) / this.rasterSize) - 1;
     // A zoom-out can expose millions of positions in the old tile grid. During
     // motion only existing tiles can be painted; visiting empty positions freezes input.
     if (budget === 0) {
@@ -635,9 +758,9 @@ export class DrawingCanvas {
       for (const [id, tile] of layer.tiles) {
         const [x, y] = id.split(",").map(Number);
         if (x < x0 || x > x1 || y < y0 || y > y1) continue;
-        const tileLeft = layer.originX + x * RASTER_SIZE, tileTop = layer.originY + y * RASTER_SIZE;
+        const tileLeft = layer.originX + x * this.rasterSize, tileTop = layer.originY + y * this.rasterSize;
         const size = tile.canvas.width / this.dpr;
-        if (k === 1) ctx.drawImage(tile.canvas, Math.round(tileLeft - left) - RASTER_BLEED, Math.round(tileTop - top) - RASTER_BLEED, size, size);
+        if (k === 1) ctx.drawImage(tile.canvas, Math.round((tileLeft - left) * this.dpr) / this.dpr - RASTER_BLEED, Math.round((tileTop - top) * this.dpr) / this.dpr - RASTER_BLEED, size, size);
         else ctx.drawImage(tile.canvas, (tileLeft - left - RASTER_BLEED) * k, (tileTop - top - RASTER_BLEED) * k, size * k, size * k);
         cached++;
         labels += tile.labels;
@@ -650,13 +773,22 @@ export class DrawingCanvas {
     for (let y = y0; y <= y1; y++)
       for (let x = x0; x <= x1; x++) {
         const id = `${x},${y}`;
-        const tileLeft = layer.originX + x * RASTER_SIZE, tileTop = layer.originY + y * RASTER_SIZE;
+        const tileLeft = layer.originX + x * this.rasterSize, tileTop = layer.originY + y * this.rasterSize;
         visible.add(id);
         let tile = layer.tiles.get(id);
         // Always make progress by at least one tile per frame.
         if (!tile && budget > 0 && (!rendered || performance.now() < deadline)) {
-          tile = this.renderRaster(layer.scale, tileLeft, tileTop);
-          rendered = true;
+          if (budget !== Infinity && this.activeStrokePool && !this.activeStrokePool.failed) {
+            if (layer.strokes?.has(id) && layer.strokeFrame) {
+              tile = this.renderRaster(layer.scale, tileLeft, tileTop, this.rasterSize, this.rasterSize, true, layer.strokeFrame, layer.background);
+              layer.strokes.delete(id); rendered = true;
+            } else {
+              this.queueStrokes(layer);
+            }
+          } else {
+            tile = this.renderRaster(layer.scale, tileLeft, tileTop);
+            rendered = true;
+          }
         }
         if (!tile) {
           missing++;
@@ -667,15 +799,16 @@ export class DrawingCanvas {
         layer.tiles.set(id, tile);
         labels += tile.labels;
         const size = tile.canvas.width / this.dpr;
+        if (!present) continue;
         if (k === 1)
           // Whole pixels keep cached text sharp when a resize leaves the centre on a half pixel.
-          ctx.drawImage(tile.canvas, Math.round(tileLeft - left) - RASTER_BLEED, Math.round(tileTop - top) - RASTER_BLEED, size, size);
+          ctx.drawImage(tile.canvas, Math.round((tileLeft - left) * this.dpr) / this.dpr - RASTER_BLEED, Math.round((tileTop - top) * this.dpr) / this.dpr - RASTER_BLEED, size, size);
         else ctx.drawImage(tile.canvas, (tileLeft - left - RASTER_BLEED) * k, (tileTop - top - RASTER_BLEED) * k, size * k, size * k);
       }
     if (layer === this.front) {
       this.lastTextCount = labels;
       // About 64 MB of raster pixels, allowing at least the current viewport on large screens.
-      const limit = Math.max(visible.size, Math.floor(16_000_000 / Math.ceil((RASTER_SIZE + 2 * RASTER_BLEED) * this.dpr) ** 2));
+      const limit = Math.max(visible.size, Math.floor(16_000_000 / Math.ceil((this.rasterSize + 2 * RASTER_BLEED) * this.dpr) ** 2));
       for (const id of layer.tiles.keys()) {
         if (layer.tiles.size <= limit) break;
         if (!visible.has(id)) {
@@ -687,16 +820,108 @@ export class DrawingCanvas {
     return missing;
   }
 
-  private dropLayer(layer: RasterLayer | null) {
-    for (const tile of layer?.tiles.values() ?? []) tile.canvas.width = tile.canvas.height = 1;
+  private clearRecentLayers() {
+    for (const layer of this.recentLayers) this.dropLayer(layer);
+    this.recentLayers = [];
   }
 
-  private renderRaster(s: number, left: number, top: number, w = RASTER_SIZE, h = RASTER_SIZE, selection = true): RasterTile {
+  private retainLayer(layer: RasterLayer | null) {
+    if (!layer) return;
+    if (layer.key !== this.sceneKey || layer.staging || layer.strokeJob || !layer.tiles.size) { this.dropLayer(layer); return; }
+    this.recentLayers.push(layer);
+    // At most two scales and 64 MB of tile pixels beyond the active layers.
+    const pixels = (l: RasterLayer) => [...l.tiles.values()].reduce((n, t) => n + t.canvas.width * t.canvas.height, 0);
+    while (this.recentLayers.length > 2 || this.recentLayers.reduce((n, l) => n + pixels(l), 0) > 16_000_000) {
+      this.dropLayer(this.recentLayers.shift()!);
+    }
+  }
+
+  private dropLayer(layer: RasterLayer | null) {
+    for (const tile of layer?.tiles.values() ?? []) tile.canvas.width = tile.canvas.height = 1;
+    layer?.strokeFrame?.bitmap.close();
+    if (layer) layer.strokeFrame = undefined;
+    layer?.strokes?.clear();
+    layer?.background?.bitmap.close();
+    if (layer) layer.background = undefined;
+  }
+
+  private queueStrokes(layer: RasterLayer) {
+    if (!this.activeStrokePool || this.activeStrokePool.failed || layer.strokeJob) return;
+    const target = this.zoomMotion && layer.scale === this.zoomMotion.scale;
+    const left = target ? layer.originX : this.cx * layer.scale - this.width / 2;
+    const top = target ? layer.originY : -this.cy * layer.scale - this.height / 2;
+    const x0 = Math.floor((left - layer.originX) / this.rasterSize), y0 = Math.floor((top - layer.originY) / this.rasterSize);
+    const x1 = Math.ceil((left - layer.originX + this.width) / this.rasterSize), y1 = Math.ceil((top - layer.originY + this.height) / this.rasterSize);
+    let missing = false;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++)
+      if (!layer.tiles.has(`${x},${y}`) && !layer.strokes?.has(`${x},${y}`)) missing = true;
+    if (!missing) return;
+    const originX = layer.originX + x0 * this.rasterSize - RASTER_BLEED;
+    const originY = layer.originY + y0 * this.rasterSize - RASTER_BLEED;
+    const width = (x1 - x0) * this.rasterSize + 2 * RASTER_BLEED, height = (y1 - y0) * this.rasterSize + 2 * RASTER_BLEED;
+    const pool = this.activeStrokePool;
+    const work = pool.render({
+      scale: layer.scale, left: originX, top: originY, width, height,
+      dpr: this.dpr, hidden: [...this.hiddenLayers], images: this.imagesVisible ? 1 : 0,
+    });
+    if (!work) return;
+    layer.strokeFrame?.bitmap.close();
+    layer.strokeFrame = undefined;
+    layer.strokes?.clear();
+    layer.strokeJob = true;
+    const key = this.sceneKey, dpr = this.dpr;
+    work.then(async bitmaps => {
+      try {
+        if (this.front !== layer || this.sceneKey !== key || bitmaps.some(b => !b)) return;
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.ceil(width * dpr); canvas.height = Math.ceil(height * dpr);
+        const ctx = canvas.getContext("2d")!;
+        // Each worker owns consecutive complete batches: compositing in this
+        // order preserves the source stroke order and overlapping colours.
+        for (const result of bitmaps) ctx.drawImage(result!.bitmap, 0, 0);
+        const backgroundResult = bitmaps.find(result => result?.background);
+        const background = backgroundResult?.background;
+        layer.background?.bitmap.close();
+        layer.background = undefined;
+        if (background) {
+          layer.background = { bitmap: background, left: originX, top: originY };
+          delete backgroundResult!.background;
+        }
+        const bitmap = await createImageBitmap(canvas);
+        if (this.front !== layer || this.sceneKey !== key) { bitmap.close(); return; }
+        layer.strokeFrame = { bitmap, left: originX, top: originY };
+        layer.strokes = new Set();
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+          const id = `${x},${y}`;
+          if (!layer.tiles.has(id)) layer.strokes.add(id);
+        }
+        // Prepare ready tiles before painting the stretched stand-in again.
+        // Otherwise its compositing cost consumes the entire per-frame budget
+        // and forces one cheap tile per display frame even though strokes are done.
+        while (this.front === layer && this.sceneKey === key && layer.strokes?.size && !this.zoomMotion && performance.now() - this.zoomInputAt >= ZOOM_SETTLE_MS) {
+          const deadline = performance.now() + RENDER_BUDGET_MS;
+          for (const id of layer.strokes) {
+            const [x, y] = id.split(",").map(Number);
+            layer.tiles.set(id, this.renderRaster(layer.scale, layer.originX + x * this.rasterSize, layer.originY + y * this.rasterSize, this.rasterSize, this.rasterSize, true, layer.strokeFrame, layer.background));
+            layer.strokes.delete(id);
+            if (performance.now() >= deadline) break;
+          }
+          this.request();
+          await new Promise(resolve => window.setTimeout(resolve, 0));
+        }
+      } finally {
+        for (const result of bitmaps) { result?.bitmap.close(); result?.background?.close(); }
+        layer.strokeJob = false; this.request();
+      }
+    }).catch(() => { pool.dispose(); this.request(); });
+  }
+
+  private renderRaster(s: number, left: number, top: number, w = this.rasterSize, h = this.rasterSize, selection = true, strokes?: RasterFrame, background?: RasterFrame): RasterTile {
     const margin = RASTER_BLEED;
     const canvas = document.createElement("canvas");
     canvas.width = Math.ceil((w + 2 * margin) * this.dpr);
     canvas.height = Math.ceil((h + 2 * margin) * this.dpr);
-    const ctx = canvas.getContext("2d")!;
+    const ctx = canvas.getContext("2d", { willReadFrequently: !!strokes })!;
     const { theme } = this;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = theme.bg;
@@ -710,30 +935,28 @@ export class DrawingCanvas {
     const toPx = (x: number, y: number): [number, number] => [x * s, -y * s];
 
     world();
-    this.drawImages(ctx, vis);
+    if (background) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(background.bitmap, Math.round((left - margin - background.left) * this.dpr), Math.round((top - margin - background.top) * this.dpr), canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+      world();
+    } else this.drawImages(ctx, vis);
     ctx.lineJoin = "bevel";
     ctx.lineCap = "butt";
     const visTiles = this.tiles.filter((t) => onScreen(t.bbox));
     // fills first, then strokes, then dots
-    for (const pass of ["fillPattern", "fillSolid", "fillUnion", "stroke", "dot"] as const)
+    for (const pass of ["fillPattern", "fillSolid", "fillUnion", "stroke", "dot"] as const) {
+      if (pass === "stroke") {
+        if (strokes) {
+          ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.drawImage(strokes.bitmap, Math.round((left - margin - strokes.left) * this.dpr), Math.round((top - margin - strokes.top) * this.dpr), canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+          ctx.restore();
+        } else this.paintStrokes(ctx, s, vis);
+        continue;
+      }
       for (const t of visTiles)
         for (const b of t.batches) {
           if (b.kind !== pass || this.hiddenLayers.has(b.layer) || b.maxSize * s < 0.75) continue;
-          if (pass === "stroke") {
-            ctx.strokeStyle = b.color;
-            ctx.lineWidth = 1 / s;
-            // Dashes are in drawing units; a pattern finer than a few pixels reads as continuous, as in AutoCAD.
-            const pattern = b.dash === undefined ? undefined : d.dashes?.[b.dash];
-            const dashed = !!pattern && pattern.reduce((a, v) => a + v, 0) * s >= 3;
-            if (dashed) ctx.setLineDash(pattern!.map((v) => (v > 0 ? v : 1 / s)));
-            if (b.parts) {
-              // Stroke once so overlaps retain the original antialiasing/opacity.
-              const path = new Path2D(b.path);
-              for (const part of b.parts.values()) if (onScreen(part.bbox)) path.addPath(part.path);
-              ctx.stroke(path);
-            } else ctx.stroke(b.path);
-            if (dashed) ctx.setLineDash([]);
-          } else if (pass === "dot") {
+          if (pass === "dot") {
             if (s < 0.5) continue; // dots are noise at overview scale
             ctx.fillStyle = b.color;
             // Points have no world radius. Draw a small mark in screen pixels.
@@ -750,6 +973,7 @@ export class DrawingCanvas {
           }
         }
 
+    }
     // text in screen space
     screen();
     let nText = 0;

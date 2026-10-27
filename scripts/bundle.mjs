@@ -51,6 +51,7 @@ mkdirSync(stage, { recursive: true });
 run(process.execPath, [path.join(root, "node_modules/typescript/bin/tsc"), "-p", "tsconfig.build.json"]);
 const { build } = await import("esbuild");
 await build({ entryPoints: [path.join(root, "viewer/main.ts")], bundle: true, format: "esm", target: "es2022", outfile: path.join(root, "viewer/dist/viewer.js") });
+await build({ entryPoints: [path.join(root, "viewer/stroke-worker.ts")], bundle: true, format: "esm", target: "es2022", outfile: path.join(root, "viewer/dist/stroke-worker.js") });
 // ReadyToRun and no single-file compression: every worker start would otherwise inflate the
 // runtime and JIT ACadSharp again, which a Windows tester saw as a very slow first open.
 run(dotnet, ["publish", "sidecar", "-c", "Release", "-r", rid, "--self-contained", "true", "-p:PublishSingleFile=true", "-p:PublishReadyToRun=true", "-o", path.join(stage, "bin", "sidecar")]);

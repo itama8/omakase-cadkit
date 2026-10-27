@@ -1263,6 +1263,68 @@ window.addEventListener("keydown", (e) => {
   state: () => ({ file, ready: Boolean(lint?.findings), entities: drawing?.entities.length ?? 0, findings: lint?.findings.length ?? 0, drawMs: view.lastDrawMs, labels: view.lastTextCount }),
 };
 
+// Updates: the server checks GitHub at most hourly. An installed Windows copy installs the
+// new version itself; other downloads link to it. "Not now" hides one version only.
+async function checkUpdate() {
+  let info: any;
+  try {
+    info = await (await fetch("/api/update")).json();
+  } catch { return; }
+  if (!info.enabled || !info.available || localStorage.getItem("cadkit.update.dismissed") === info.latest) return;
+  const box = $("#update");
+  const install = $<HTMLButtonElement>("#update-install");
+  const link = $<HTMLAnchorElement>("#update-link");
+  $("#update-text").textContent = `Version ${info.latest} is available`;
+  box.dataset.version = info.latest;
+  box.title = `You have ${info.current}. Release notes: ${info.page}`;
+  install.hidden = !info.installer;
+  link.hidden = !!info.installer;
+  link.href = info.page;
+  box.hidden = false;
+}
+async function installUpdate() {
+  const install = $<HTMLButtonElement>("#update-install");
+  const box = $("#update");
+  install.disabled = true;
+  box.classList.remove("failed");
+  const before = await fetch("/api/health", { signal: AbortSignal.timeout(2000) }).then((r) => r.json()).catch(() => null);
+  try {
+    const res = await fetch("/api/update/install", { method: "POST", signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error((await res.json()).error);
+  } catch (err: any) {
+    $("#update-text").textContent = `Update failed: ${err.message ?? err}`;
+    box.classList.add("failed");
+    install.disabled = false;
+    return;
+  }
+  $("#update-text").textContent = "Downloading the update…";
+  // The installer stops this server, replaces the app and starts it again: wait for a new
+  // version to answer, then reload. A download or hash failure is reported in the meantime.
+  for (let i = 0; i < 600; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const health = await fetch("/api/health", { signal: AbortSignal.timeout(2000) }).then((r) => r.json()).catch(() => null);
+    if (health?.version && before?.version && health.version !== before.version) return location.reload();
+    if (!health) { $("#update-text").textContent = "Installing the update…"; continue; }
+    const state = await fetch("/api/update", { signal: AbortSignal.timeout(2000) }).then((r) => r.json()).catch(() => null);
+    if (state?.installing?.state === "failed") {
+      $("#update-text").textContent = `Update failed: ${state.installing.error}`;
+      box.classList.add("failed");
+      install.disabled = false;
+      return;
+    }
+    if (state?.installing?.state === "installing") $("#update-text").textContent = "Installing the update…";
+  }
+  $("#update-text").textContent = "The update is taking long; restart omakase-cadkit from the Start menu.";
+}
+$("#update-install").addEventListener("click", () => void installUpdate());
+$("#update-dismiss").addEventListener("click", () => {
+  const latest = $("#update").dataset.version;
+  if (latest) localStorage.setItem("cadkit.update.dismissed", latest);
+  $("#update").hidden = true;
+});
+window.setTimeout(() => void checkUpdate(), 1500);
+window.setInterval(() => { if (!$<HTMLButtonElement>("#update-install").disabled) void checkUpdate(); }, 3_600_000);
+
 // Compatibility for existing browser automation.
 (window as any).drawkit = (window as any).cadkit;
 

@@ -34,6 +34,19 @@ Settings › Apps.
 `v0.1.0-alpha.1` predates the Windows installer. On that release, Windows users unzip
 `…-win32-x64.zip` and double-click `launch.cmd`.
 
+## Updates
+
+Downloads check GitHub for a newer published version when the viewer opens and then
+hourly. On Windows, click **Install and restart** to download the installer, verify
+its SHA-256 and replace the installed app. The viewer reloads when it restarts.
+Mac, Linux and portable Windows downloads show a link to the release instead.
+**Not now** hides that version.
+
+The first version with this feature must be installed manually; older downloads
+cannot acquire the updater by themselves. Source checkouts do not check for updates.
+Set `OMAKASE_CADKIT_UPDATE_CHECK=0` before launching to disable checks. Update checks
+contact GitHub; drawings stay on your computer.
+
 ## Open a drawing
 
 Click the drawing in the middle of the empty screen and pick a DWG or DXF file. Or

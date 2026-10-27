@@ -56,6 +56,8 @@ Screenshot the viewer and run its interaction checks in headless Chromium:
 node scripts/shot.mjs 'http://127.0.0.1:4280/?file=/absolute/path/to/fixtures/sewer_bad.dxf' out.png 1500 900 --check
 ```
 
+Pass `--dpr 2` to repeat at 200% display scale. The zoom deadlines stay the same.
+
 ## 5. Build the downloads
 
 `npm run bundle` builds the download for the computer you run it on into

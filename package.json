@@ -21,7 +21,7 @@
   "scripts": {
     "build:lib": "tsc -p tsconfig.build.json",
     "build:sidecar": "node scripts/build-sidecar.mjs",
-    "build:viewer": "esbuild viewer/main.ts --bundle --format=esm --target=es2022 --sourcemap --outfile=viewer/dist/viewer.js",
+    "build:viewer": "esbuild viewer/main.ts --bundle --format=esm --target=es2022 --sourcemap --outfile=viewer/dist/viewer.js && esbuild viewer/stroke-worker.ts --bundle --format=esm --target=es2022 --outfile=viewer/dist/stroke-worker.js",
     "build": "npm run build:lib && npm run build:sidecar && npm run build:viewer",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.ts",

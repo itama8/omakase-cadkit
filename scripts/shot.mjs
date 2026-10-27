@@ -1,17 +1,20 @@
 #!/usr/bin/env node
 // Headless screenshot of the viewer after the drawing has loaded and drawn.
-//   node scripts/shot.mjs <url> <out.png> [width height] [--eval "js run before the shot"]
+//   node scripts/shot.mjs <url> <out.png> [width height] [--dpr 2] [--eval "js run before the shot"]
 // Uses the Chrome DevTools protocol over Node's built-in WebSocket; needs `chromium` on PATH.
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const [url, out, w = "1500", h = "900"] = process.argv.slice(2).filter((a, i, all) => a !== "--eval" && a !== "--check" && all[i - 1] !== "--eval");
+const [url, out, w = "1500", h = "900"] = process.argv.slice(2).filter((a, i, all) => !["--eval", "--check", "--dpr"].includes(a) && !["--eval", "--dpr"].includes(all[i - 1]));
+const dprIdx = process.argv.indexOf("--dpr");
+const dpr = dprIdx > 0 ? Number(process.argv[dprIdx + 1]) : 1;
+if (!Number.isFinite(dpr) || dpr <= 0) throw new Error("--dpr must be a positive number");
 const evalIdx = process.argv.indexOf("--eval");
 const pre = evalIdx > 0 ? process.argv[evalIdx + 1] : null;
 if (!url || !out) {
-  console.error("usage: shot.mjs <url> <out.png> [width height] [--eval js]");
+  console.error("usage: shot.mjs <url> <out.png> [width height] [--dpr ratio] [--eval js]");
   process.exit(2);
 }
 const port = 9300 + Math.floor(Math.random() * 500);
@@ -44,7 +47,7 @@ const evaluate = async (expression) => {
   return response.result?.result?.value;
 };
 try {
-  await send("Emulation.setDeviceMetricsOverride", { width: +w, height: +h, deviceScaleFactor: 1, mobile: false });
+  await send("Emulation.setDeviceMetricsOverride", { width: +w, height: +h, deviceScaleFactor: dpr, mobile: false });
   await send("Page.navigate", { url });
   let state = null;
   for (let i = 0; i < 240; i++) {

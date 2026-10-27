@@ -70,11 +70,19 @@ Root: HKA; Subkey: "Software\Classes\.dxf\OpenWithProgids"; ValueType: string; V
 
 [Run]
 Filename: "{app}\omakase-cadkit.exe"; Description: "{cm:LaunchProgram,omakase-cadkit}"; Flags: nowait postinstall skipifsilent
+; An in-app update runs this installer with /RELAUNCH=1: start the viewer server again, but
+; open no new tab; the tab that asked for the update reloads itself.
+Filename: "{app}\omakase-cadkit.exe"; Parameters: "--no-open --port {param:VIEWERPORT|4280}"; Flags: nowait; Check: RelaunchAfterUpdate
 
 [UninstallRun]
 Filename: "{app}\omakase-cadkit.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated; RunOnceId: "StopViewer"
 
 [Code]
+function RelaunchAfterUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;
+
 // An upgrade replaces files a running viewer holds open: stop it first.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
@@ -83,6 +91,6 @@ var
 begin
   Exe := ExpandConstant('{app}\omakase-cadkit.exe');
   if FileExists(Exe) then
-    Exec(Exe, 'stop', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(Exe, 'stop --port ' + ExpandConstant('{param:VIEWERPORT|4280}'), ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Result := '';
 end;

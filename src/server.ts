@@ -14,6 +14,7 @@ import { buildStamp } from "./sidecar.ts";
 import { CACHE_DIR, DrawingStore, expandHome } from "./store.ts";
 import { resolveUnits } from "./sheet.ts";
 import { pickDrawing, pickFolder } from "./file-picker.ts";
+import { checkForUpdate, currentVersion, downloadInstaller, installKind, runInstaller, type UpdateInfo } from "./update.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const VIEWER = path.join(ROOT, "viewer");
@@ -55,6 +56,11 @@ export function startServer(port = 4280, host = "127.0.0.1") {
   const store = new DrawingStore(4);
   const ctxCache = new Map<string, { key: unknown; config: string; ctx: ReturnType<typeof makeContext> }>();
   let picking = false;
+  // Update checks: at most hourly, never from a source checkout or when switched off.
+  const updates = process.env.OMAKASE_CADKIT_UPDATE_CHECK !== "0" && installKind() !== "source";
+  let update: { at: number; info?: UpdateInfo; error?: string } | null = null;
+  let checking: Promise<void> | null = null;
+  let installing: { state: "downloading" | "installing" | "failed"; error?: string } | null = null;
 
   async function ctxFor(file: string) {
     const { drawing } = await store.open(file);
@@ -70,7 +76,39 @@ export function startServer(port = 4280, host = "127.0.0.1") {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${host}:${port}`);
     try {
-      if (url.pathname === "/api/health") return json(res, 200, { ok: true, app: "omakase-cadkit", build: BUILD, pid: process.pid });
+      if (url.pathname === "/api/health") return json(res, 200, { ok: true, app: "omakase-cadkit", build: BUILD, version: currentVersion(), pid: process.pid });
+      if (url.pathname === "/api/update" && req.method === "GET") {
+        if (!updates) return json(res, 200, { enabled: false });
+        if (!update || Date.now() - update.at > 3_600_000) {
+          checking ??= (async () => {
+            try {
+              update = { at: Date.now(), info: await checkForUpdate() };
+            } catch (err: any) {
+              update = { at: Date.now(), error: String(err?.message ?? err) };
+            }
+          })().finally(() => { checking = null; });
+          await checking;
+        }
+        return json(res, 200, { enabled: true, ...update?.info, error: update?.error, installing });
+      }
+      if (url.pathname === "/api/update/install") {
+        if (req.method !== "POST") return json(res, 405, { error: "Use POST." });
+        const address = server.address();
+        const boundPort = typeof address === "object" && address ? address.port : port;
+        if (![`${host}:${boundPort}`, `localhost:${boundPort}`].includes(req.headers.host ?? "") || req.headers.origin !== `http://${req.headers.host}`)
+          return json(res, 403, { error: "Install updates from this viewer." });
+        const installer = update?.info?.available ? update.info.installer : undefined;
+        if (!updates || !installer) return json(res, 409, { error: "No update this copy can install itself." });
+        if (installing && installing.state !== "failed") return json(res, 409, { error: "An update is already being installed." });
+        installing = { state: "downloading" };
+        downloadInstaller(installer)
+          .then(async (file) => {
+            installing = { state: "installing" };
+            await runInstaller(file, boundPort);
+          })
+          .catch((err) => { installing = { state: "failed", error: String(err?.message ?? err) }; });
+        return json(res, 202, { installing });
+      }
       if (url.pathname === "/api/properties") {
         const file = fileParam(url);
         if (!file) return json(res, 400, { error: "file is required" });
