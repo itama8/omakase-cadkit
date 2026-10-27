@@ -96,7 +96,9 @@ test("source viewer exposes its version and refuses install requests without lau
 test("installed update endpoints share a check, reject duplicate installs and report launch failure", { timeout: 15000 }, async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "cadkit-installed-update-"));
   cpSync("dist", path.join(dir, "dist"), { recursive: true });
-  cpSync("package.json", path.join(dir, "package.json"));
+  // The fake release is alpha.3; keep its installed predecessor independent of
+  // the checkout version so cutting a new release does not change this scenario.
+  writeFileSync(path.join(dir, "package.json"), JSON.stringify({ ...JSON.parse(readFileSync("package.json", "utf8")), version: "0.1.0-alpha.2" }));
   writeFileSync(path.join(dir, "unins000.exe"), "");
   mkdirSync(path.join(dir, "bin/sidecar"), { recursive: true });
   writeFileSync(path.join(dir, "bin/sidecar/omakase-cadkit-sidecar.exe"), "");
