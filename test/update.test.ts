@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { checkForUpdate, compareVersions, downloadInstaller, installKind, pickUpdate, runInstaller } from "../src/update.ts";
 
@@ -125,14 +126,19 @@ test("installed update endpoints share a check, reject duplicate installs and re
       return new Response("payload");
     };
   `);
-  const child = spawn(process.execPath, ["--import", path.join(dir, "mock.mjs"), path.join(dir, "dist/server.js"), "--port", "0"], {
+  // Node imports need file URLs on Windows. Start the exported server explicitly:
+  // macOS resolves /var to /private/var, so argv and import.meta paths can differ.
+  const entry = `import(${JSON.stringify(pathToFileURL(path.join(dir, "dist/server.js")).href)}).then(m => m.startServer(0))`;
+  const child = spawn(process.execPath, ["--import", pathToFileURL(path.join(dir, "mock.mjs")).href, "--input-type=module", "--eval", entry], {
     stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TEMP: dir, TMP: dir, OMAKASE_CADKIT_UPDATE_CHECK: "1", OMAKASE_CADKIT_CACHE: path.join(dir, "cache") },
   });
+  let errors = "";
+  child.stderr.on("data", chunk => { errors = (errors + String(chunk)).slice(-4000); });
   try {
     const base = await new Promise<string>((resolve, reject) => {
       child.stdout.on("data", (chunk) => { const m = String(chunk).match(/http:\/\/127\.0\.0\.1:\d+/); if (m) resolve(m[0]); });
       child.once("error", reject);
-      child.once("exit", (code) => reject(new Error(`Server exited ${code}`)));
+      child.once("exit", (code) => reject(new Error(`Server exited ${code}: ${errors}`)));
     });
     const infos = await Promise.all(Array.from({ length: 4 }, async () => (await fetch(`${base}/api/update`)).json()));
     assert.ok(infos.every((info) => info.installer && !info.error), JSON.stringify(infos));

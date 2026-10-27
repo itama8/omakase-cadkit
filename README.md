@@ -42,7 +42,7 @@ its SHA-256 and replace the installed app. The viewer reloads when it restarts.
 Mac, Linux and portable Windows downloads show a link to the release instead.
 **Not now** hides that version.
 
-Version `0.1.0-alpha.3` is the first with this feature and must be installed manually;
+Version `0.1.0-alpha.3.1` is the first with this feature and must be installed manually;
 older downloads cannot acquire the updater by themselves. Source checkouts do not check for updates.
 Set `OMAKASE_CADKIT_UPDATE_CHECK=0` before launching to disable checks. Update checks
 contact GitHub; drawings stay on your computer.
