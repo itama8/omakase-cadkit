@@ -108,6 +108,7 @@ test("installed update endpoints share a check, reject duplicate installs and re
     import { syncBuiltinESMExports } from "node:module";
     import { EventEmitter } from "node:events";
     Object.defineProperty(process, "platform", { value: "win32" });
+    Object.defineProperty(process, "arch", { value: "x64" });
     const originalSpawn = cp.spawn;
     cp.spawn = function(file, ...args) {
       if (!String(file).endsWith("-setup.exe")) return originalSpawn(process.execPath, ["-e", "process.stdin.resume()"], args[1]);

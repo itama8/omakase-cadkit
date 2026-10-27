@@ -1,6 +1,6 @@
 {
   "name": "omakase-cadkit",
-  "version": "0.1.0-alpha.3.1",
+  "version": "0.1.0-alpha.3.2",
   "private": true,
   "description": "View, inspect and lint DWG/DXF drawings for civil infrastructure.",
   "type": "module",
