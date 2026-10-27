@@ -343,6 +343,7 @@ sealed partial class Payload
 		// Semantic entity list and render primitives are written in two passes over model space
 		// so both stay addressable by the same index.
 		var ents = _doc.Entities.ToList();
+		PrepareHatches(ents);
 		var bboxes = new double[ents.Count][];
 
 		var em = h.ModelSpaceExtMin;
@@ -1226,12 +1227,20 @@ sealed partial class Payload
 				}
 				if (estimate <= PatternLimit && estimate <= _patternBudget)
 				{
-					result = new();
-					foreach (var seg in ht.ExplodePattern())
+					if (lines.All(l => l.DashLengths == null || l.DashLengths.Count == 0))
 					{
-						if (seg is not Line l) continue;
-						Dash(result, l.StartPoint.X, l.StartPoint.Y, l.EndPoint.X, l.EndPoint.Y, lines);
-						if (result.Count > PatternLimit || result.Count > _patternBudget) { result = null; break; }
+						result = PreparedPattern(ht);
+						if (result?.Count > _patternBudget) result = null;
+					}
+					else
+					{
+						result = new();
+						foreach (var seg in ht.ExplodePattern())
+						{
+							if (seg is not Line l) continue;
+							Dash(result, l.StartPoint.X, l.StartPoint.Y, l.EndPoint.X, l.EndPoint.Y, lines);
+							if (result.Count > PatternLimit || result.Count > _patternBudget) { result = null; break; }
+						}
 					}
 					if (result != null) _patternBudget -= result.Count;
 				}

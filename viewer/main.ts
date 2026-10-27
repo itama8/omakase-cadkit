@@ -499,7 +499,7 @@ async function open(path: string, opts: { hash?: string } = {}) {
     fileVersion = version;
     homeBox = null;
     byHandle = new Map(drawing.entities.map((e, i) => [e.h, i]));
-    view.setDrawing(drawing);
+    view.setDrawing(drawing, true);
     $("#background-tools").hidden = true;
     void loadImages(request, drawing, path);
     restoreViewSettings();

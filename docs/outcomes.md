@@ -12,7 +12,7 @@ are in the linked devlogs. Updated 2026-10-27.
 |---|---|---|---|
 | O11 | A tester installs one download and uses the app with nothing else installed. | verifying | Publish the `v0.1.0-alpha.2` draft release ([s04](../.devlog/2026-10-27-s04.md)); the tester installs it and opens 3–8 MB drawings A → B → A, noting any window and the load timings. CI already builds, installs, launches and uninstalls it ([s03](../.devlog/2026-10-27-s03.md)). |
 | O10 | A drafter reading a finding knows what is wrong, how to fix it in AutoCAD, and can tune the checks. | partial | Turn rules on/off, change severity and accept findings from the GUI ([s04](../.devlog/2026-10-26-s04.md)). |
-| O6 | Pan, zoom and selection feel instant on heavy drawings. | active | Verify the partial loading/zoom repair on desktop; resolve high-DPI dense-hatch redraw and cold-open latency ([s08](../.devlog/2026-10-27-s08.md)). |
+| O6 | Pan, zoom and selection feel instant on heavy drawings. | active | Retest quicker cold/warm opening on desktop and finish high-DPI hatch redraw ([s09](../.devlog/2026-10-27-s09.md)). |
 | O5 | Reviewers can trust what is drawn and found on a wider set of drawings. | partial | Review the newly drawn details in the viewer; plot styles, exact fonts and layouts remain ([s10](../.devlog/2026-10-26-s10.md)). |
 
 ## Next

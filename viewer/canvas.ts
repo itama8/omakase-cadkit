@@ -60,6 +60,16 @@ interface RasterTile {
   labels: number;
 }
 
+interface PreparedDrawing {
+  theme: string;
+  tiles: Tile[];
+  primBox: Float64Array;
+  entPrims: number[][];
+  hitGrid: Map<string, number[]>;
+  hitCell: number;
+  extents: Bbox;
+}
+
 /** Raster tiles rendered at one scale, in drawing pixels at that scale (x right, y down). */
 interface RasterLayer {
   scale: number;
@@ -133,6 +143,7 @@ export class DrawingCanvas {
   }
   drawing: Drawing | null = null;
   private tiles: Tile[] = [];
+  private preparedDrawings = new Map<Drawing, PreparedDrawing>();
   private primBox: Float64Array = new Float64Array(0); // 4 per prim, relative coords
   private entPrims: number[][] = [];
   private hitGrid = new Map<string, number[]>();
@@ -194,7 +205,9 @@ export class DrawingCanvas {
 
   // ------------------------------------------------------------------ loading
 
-  setDrawing(d: Drawing) {
+  /** Reuse is opt-in for payload objects revalidated by the host. The default
+   * rebuilds, including callers that edit a payload in place before setting it. */
+  setDrawing(d: Drawing, reuse = false) {
     this.dropLayer(this.front);
     this.dropLayer(this.back);
     this.front = this.back = null;
@@ -204,18 +217,32 @@ export class DrawingCanvas {
     this.selected.clear();
     this.findings = [];
     this.activeFinding = null;
-    const n = d.prims.length;
-    const box = new Float64Array(n * 4);
-    this.entPrims = d.entities.map(() => []);
-    for (let i = 0; i < n; i++) {
-      const b = primBbox(d.prims[i]);
-      box.set(b, i * 4);
-      this.entPrims[d.prims[i][1]]?.push(i);
+    const theme = JSON.stringify(this.theme);
+    const prepared = reuse ? this.preparedDrawings.get(d) : undefined;
+    if (prepared?.theme === theme) {
+      this.tiles = prepared.tiles;
+      this.primBox = prepared.primBox;
+      this.entPrims = prepared.entPrims;
+      this.hitGrid = prepared.hitGrid;
+      this.hitCell = prepared.hitCell;
+      this.extents = prepared.extents;
+    } else {
+      const n = d.prims.length;
+      const box = new Float64Array(n * 4);
+      this.entPrims = d.entities.map(() => []);
+      for (let i = 0; i < n; i++) {
+        const b = primBbox(d.prims[i]);
+        box.set(b, i * 4);
+        this.entPrims[d.prims[i][1]]?.push(i);
+      }
+      this.primBox = box;
+      this.extents = this.extentsRel();
+      this.buildTiles();
+      this.buildHitGrid();
     }
-    this.primBox = box;
-    this.extents = this.extentsRel();
-    this.buildTiles();
-    this.buildHitGrid();
+    this.preparedDrawings.delete(d);
+    this.preparedDrawings.set(d, { theme, tiles: this.tiles, primBox: this.primBox, entPrims: this.entPrims, hitGrid: this.hitGrid, hitCell: this.hitCell, extents: this.extents });
+    while (this.preparedDrawings.size > 2) this.preparedDrawings.delete(this.preparedDrawings.keys().next().value!);
     this.fit();
   }
 

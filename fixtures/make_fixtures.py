@@ -256,8 +256,57 @@ def fidelity_fixture():
         doc.export_sections(writer)
 
 
+def continuous_hatch_fixture():
+    doc = ezdxf.new("R2013")
+    msp = doc.modelspace()
+    # Survey coordinates, nested islands, vertices shared by adjacent edges, and two
+    # continuous families. Both polyline and individual-edge boundary encodings.
+    for variant in range(2):
+        x, y = 500000 + variant * 20, 2700000
+        hatch = msp.add_hatch()
+        hatch.set_pattern_fill("USER", scale=1)
+        hatch.set_pattern_definition([(0, (x, y + .5), (0, 1), []),
+                                      (90, (x + .5, y), (1, 0), [])])
+        for k, (a, b, c, d) in enumerate([(0, 0, 12, 10), (2, 2, 10, 8), (4, 4, 8, 6)]):
+            pts = [(x+a, y+b), (x+c, y+b), (x+c, y+d), (x+a, y+d)]
+            if variant == 0:
+                hatch.paths.add_polyline_path(pts, is_closed=True, flags=1 if k == 0 else 0)
+            else:
+                edges = hatch.paths.add_edge_path(flags=1 if k == 0 else 0)
+                for i in range(4):
+                    edges.add_line(pts[i], pts[(i+1) % 4])
+    doc.saveas(OUT / "continuous_hatch.dxf")
+
+
+def pattern_pipeline_fixture():
+    doc = ezdxf.new("R2013")
+    msp = doc.modelspace()
+    block = doc.blocks.new("SHARED_PATTERN")
+    hatch = block.add_hatch()
+    hatch.set_pattern_fill("USER", scale=1)
+    hatch.set_pattern_definition([(0, (0, .5), (0, 1), []),
+                                  (90, (.5, 0), (1, 0), [])])
+    for k, (a, b, c, d) in enumerate([(0, 0, 12, 10), (2, 2, 10, 8), (4, 4, 8, 6)]):
+        hatch.paths.add_polyline_path([(a, b), (c, b), (c, d), (a, d)], is_closed=True, flags=1 if k == 0 else 0)
+    msp.add_blockref("SHARED_PATTERN", (0, 0))
+    msp.add_blockref("SHARED_PATTERN", (20, 0))
+    # Look-ahead must apply the density guard too, rather than starting billions
+    # of rows on a future hatch that serial emission will reject immediately.
+    dense = msp.add_hatch()
+    dense.set_pattern_fill("USER", scale=1)
+    dense.set_pattern_definition([(0, (50, 0), (0, 1e-9), [])])
+    dense.paths.add_polyline_path([(50, 0), (62, 0), (62, 10), (50, 10)], is_closed=True)
+    dashed = msp.add_hatch()
+    dashed.set_pattern_fill("USER", scale=1)
+    dashed.set_pattern_definition([(0, (70, .5), (0, 1), [1, -1])])
+    dashed.paths.add_polyline_path([(70, 0), (82, 0), (82, 10), (70, 10)], is_closed=True)
+    doc.saveas(OUT / "pattern_pipeline.dxf")
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
+    continuous_hatch_fixture()
+    pattern_pipeline_fixture()
     hatch_text_fixture()
     fidelity_fixture()
     doc, msp = base()

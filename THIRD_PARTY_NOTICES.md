@@ -7,6 +7,8 @@ omakase-cadkit is licensed under AGPL-3.0-only; see [LICENSE](LICENSE). Dependen
 The .NET sidecar reads and writes DWG/DXF through
 [ACadSharp](https://github.com/DomCR/ACadSharp), licensed under MIT.
 The upstream license is preserved in [licenses/ACadSharp-MIT.txt](licenses/ACadSharp-MIT.txt).
+`sidecar/Patterns.cs` also adapts its hatch clipping calculation to emit segment
+coordinates without constructing temporary CAD entities.
 
 Provenance: the NuGet 3.8.0 package identifies source commit
 `3a1c66b9932f9e2dbfbbf3f03660c97d52e49b02`. Its metadata lists
