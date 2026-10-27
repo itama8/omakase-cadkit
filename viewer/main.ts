@@ -468,7 +468,12 @@ async function open(path: string, opts: { hash?: string } = {}) {
   showProgress();
   const progressTimer = window.setInterval(showProgress, 1000);
   // Let the browser paint feedback before starting work.
-  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  await new Promise<void>((resolve) => {
+    // Background/embedded tabs can suspend animation frames indefinitely.
+    const timer = window.setTimeout(resolve, 50);
+    requestAnimationFrame(() => { clearTimeout(timer); resolve(); });
+  });
+  if (request !== openRequest) { clearInterval(progressTimer); return; }
   $("#empty").classList.add("hidden");
   const t0 = performance.now();
   try {
@@ -500,6 +505,9 @@ async function open(path: string, opts: { hash?: string } = {}) {
     restoreViewSettings();
     renderLayers();
     renderMeta();
+    // Include the first rendered frame in the open timing; preparing paths alone
+    // can finish well before a heavy drawing actually reaches the canvas.
+    view.draw();
     clearInterval(progressTimer);
     overlay(null);
     $("#perf").title = `Entities in the drawing and labels drawn at this zoom\nOpened in ${(performance.now() - t0).toFixed(0)} ms (server ${serverMs} ms, ${cached ? "cached" : "converted"})`;

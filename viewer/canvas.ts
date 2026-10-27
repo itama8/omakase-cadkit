@@ -43,6 +43,8 @@ interface Batch {
   /** Index into the drawing's dash patterns, for dashed strokes. */
   dash?: number;
   path: Path2D;
+  /** Spatial pieces of disconnected hatch strokes, kept inside the original batch order. */
+  parts?: Map<number, { bbox: Bbox; path: Path2D }>;
   maxSize: number; // upper bound on primitive size in this batch; enables subpixel culling
   dots: number[];
 }
@@ -193,6 +195,9 @@ export class DrawingCanvas {
   // ------------------------------------------------------------------ loading
 
   setDrawing(d: Drawing) {
+    this.dropLayer(this.front);
+    this.dropLayer(this.back);
+    this.front = this.back = null;
     this.drawingVersion++;
     this.drawing = d;
     this.images = [];
@@ -258,8 +263,7 @@ export class DrawingCanvas {
     const ext = this.extents;
     const N = 32;
     const w = Math.max(ext[2] - ext[0], 1e-9) / N, h = Math.max(ext[3] - ext[1], 1e-9) / N;
-    const tileIdx = (i: number) => {
-      const b = this.primBox.subarray(i * 4, i * 4 + 4);
+    const tileIdx = (b: ArrayLike<number>) => {
       const big = b[2] - b[0] > w * 2 || b[3] - b[1] > h * 2;
       if (big) return N * N; // large prims share one tile
       const tx = Math.min(N - 1, Math.max(0, Math.floor(((b[0] + b[2]) / 2 - ext[0]) / w)));
@@ -270,9 +274,9 @@ export class DrawingCanvas {
     const batchMaps: Map<string, Batch>[] = tiles.map(() => new Map());
     d.prims.forEach((p, i) => {
       if (this.isDefinitionPoint(p)) return;
-      const t = tileIdx(i);
-      const tile = tiles[t];
       const b = this.primBox.subarray(i * 4, i * 4 + 4);
+      const t = tileIdx(b);
+      const tile = tiles[t];
       tile.bbox = [Math.min(tile.bbox[0], b[0]), Math.min(tile.bbox[1], b[1]), Math.max(tile.bbox[2], b[2]), Math.max(tile.bbox[3], b[3])];
       if (p[0] === "t") {
         tile.texts.push(i);
@@ -293,7 +297,25 @@ export class DrawingCanvas {
         batchMaps[t].set(key, batch);
         tile.batches.push(batch);
       }
-      if (p[0] === "d") batch.dots.push(p[4], p[5]);
+      if (p[0] === "l") {
+        // A hatch can span the sheet with thousands of disconnected strokes. Replaying
+        // its whole path for every raster tile makes both opening and sharpening stall.
+        // Partition the strokes for culling while retaining batch order and maxSize.
+        const parts = batch.parts ??= new Map();
+        const f = p[4];
+        for (let j = 0; j + 3 < f.length; j += 4) {
+          const bbox: Bbox = [Math.min(f[j], f[j + 2]), Math.min(f[j + 1], f[j + 3]), Math.max(f[j], f[j + 2]), Math.max(f[j + 1], f[j + 3])];
+          const id = tileIdx(bbox);
+          let part = parts.get(id);
+          if (!part) { part = { bbox, path: new Path2D() }; parts.set(id, part); }
+          else for (let k = 0; k < 2; k++) {
+            part.bbox[k] = Math.min(part.bbox[k], bbox[k]);
+            part.bbox[k + 2] = Math.max(part.bbox[k + 2], bbox[k + 2]);
+          }
+          part.path.moveTo(f[j], f[j + 1]);
+          part.path.lineTo(f[j + 2], f[j + 3]);
+        }
+      } else if (p[0] === "d") batch.dots.push(p[4], p[5]);
       else addPrimToPath(batch.path, p);
     });
     this.tiles = tiles.filter((t) => t.batches.length || t.texts.length);
@@ -486,9 +508,13 @@ export class DrawingCanvas {
     const now = performance.now();
     const key = `${this.drawingVersion}|${this.dpr}|${[...this.hiddenLayers].sort().join(",")}|${[...this.selected].join(",")}|${JSON.stringify(theme)}`;
     if (key !== this.sceneKey) {
-      this.dropLayer(this.front);
-      this.dropLayer(this.back);
-      this.front = this.back = null;
+      // Images can finish loading during a wheel gesture. Keep the displayed
+      // frame as a stand-in instead of forcing a synchronous full redraw then.
+      if (this.front?.tiles.size) {
+        this.dropLayer(this.back);
+        this.back = this.front;
+      } else this.dropLayer(this.front);
+      this.front = null;
       this.sceneKey = key;
     }
     const zooming = this.zoomMotion !== null || now - this.zoomInputAt < ZOOM_SETTLE_MS;
@@ -502,7 +528,7 @@ export class DrawingCanvas {
       // Align the new grid to the viewport so a fresh fit/zoom keeps text sharp.
       this.front = { scale: s, originX: this.cx * s - this.width / 2, originY: -this.cy * s - this.height / 2, tiles: new Map() };
     }
-    const budget = zooming && this.front.tiles.size ? 0 : progressive && this.back ? RENDER_BUDGET_MS : Infinity;
+    const budget = zooming && (this.front.tiles.size || this.back?.tiles.size) ? 0 : progressive && this.back ? RENDER_BUDGET_MS : Infinity;
     if (budget !== Infinity && this.gaps(this.front)) {
       this.paintOverview(ctx);
       if (this.back) this.paintLayer(ctx, this.back, 0);
@@ -528,8 +554,12 @@ export class DrawingCanvas {
     const left = this.cx * layer.scale - this.width / 2 / k, top = -this.cy * layer.scale - this.height / 2 / k;
     const x0 = Math.floor((left - layer.originX) / RASTER_SIZE), x1 = Math.ceil((left - layer.originX + this.width / k) / RASTER_SIZE) - 1;
     const y0 = Math.floor((top - layer.originY) / RASTER_SIZE), y1 = Math.ceil((top - layer.originY + this.height / k) / RASTER_SIZE) - 1;
-    let missing = 0;
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (!layer.tiles.has(`${x},${y}`)) missing++;
+    let cached = 0;
+    for (const id of layer.tiles.keys()) {
+      const [x, y] = id.split(",").map(Number);
+      if (x >= x0 && x <= x1 && y >= y0 && y <= y1) cached++;
+    }
+    const missing = (x1 - x0 + 1) * (y1 - y0 + 1) - cached;
     return missing;
   }
 
@@ -571,6 +601,23 @@ export class DrawingCanvas {
     const left = this.cx * layer.scale - this.width / 2 / k, top = -this.cy * layer.scale - this.height / 2 / k;
     const x0 = Math.floor((left - layer.originX) / RASTER_SIZE), x1 = Math.ceil((left - layer.originX + this.width / k) / RASTER_SIZE) - 1;
     const y0 = Math.floor((top - layer.originY) / RASTER_SIZE), y1 = Math.ceil((top - layer.originY + this.height / k) / RASTER_SIZE) - 1;
+    // A zoom-out can expose millions of positions in the old tile grid. During
+    // motion only existing tiles can be painted; visiting empty positions freezes input.
+    if (budget === 0) {
+      let cached = 0, labels = 0;
+      for (const [id, tile] of layer.tiles) {
+        const [x, y] = id.split(",").map(Number);
+        if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+        const tileLeft = layer.originX + x * RASTER_SIZE, tileTop = layer.originY + y * RASTER_SIZE;
+        const size = tile.canvas.width / this.dpr;
+        if (k === 1) ctx.drawImage(tile.canvas, Math.round(tileLeft - left) - RASTER_BLEED, Math.round(tileTop - top) - RASTER_BLEED, size, size);
+        else ctx.drawImage(tile.canvas, (tileLeft - left - RASTER_BLEED) * k, (tileTop - top - RASTER_BLEED) * k, size * k, size * k);
+        cached++;
+        labels += tile.labels;
+      }
+      if (layer === this.front) this.lastTextCount = labels;
+      return (x1 - x0 + 1) * (y1 - y0 + 1) - cached;
+    }
     const visible = new Set<string>();
     let labels = 0, missing = 0, rendered = false;
     for (let y = y0; y <= y1; y++)
@@ -652,7 +699,12 @@ export class DrawingCanvas {
             const pattern = b.dash === undefined ? undefined : d.dashes?.[b.dash];
             const dashed = !!pattern && pattern.reduce((a, v) => a + v, 0) * s >= 3;
             if (dashed) ctx.setLineDash(pattern!.map((v) => (v > 0 ? v : 1 / s)));
-            ctx.stroke(b.path);
+            if (b.parts) {
+              // Stroke once so overlaps retain the original antialiasing/opacity.
+              const path = new Path2D(b.path);
+              for (const part of b.parts.values()) if (onScreen(part.bbox)) path.addPath(part.path);
+              ctx.stroke(path);
+            } else ctx.stroke(b.path);
             if (dashed) ctx.setLineDash([]);
           } else if (pass === "dot") {
             if (s < 0.5) continue; // dots are noise at overview scale
