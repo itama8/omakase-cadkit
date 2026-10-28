@@ -141,6 +141,7 @@ const sevOn: Record<Severity, boolean> = { error: true, warning: true, info: fal
 let visibleFindings: Finding[] = [];
 let activeIdx = -1;
 let openRequest = 0;
+let displayedRequest = 0;
 let lintRequest = 0;
 const properties = $<HTMLDialogElement>("#properties-dialog");
 const propertiesApply = $<HTMLButtonElement>("#properties-apply");
@@ -491,37 +492,48 @@ async function open(path: string, opts: { hash?: string } = {}) {
     const loaded = res.status === 304 ? hit!.drawing : (await res.json()) as Drawing;
     if (request !== openRequest) return;
     const payloadMs = performance.now() - t0;
+    // JSON parsing, geometry preparation and canvas composition must not run as
+    // one task: allow feedback and input to paint between the opening phases.
+    await new Promise<void>(resolve => window.setTimeout(resolve, 0));
+    if (request !== openRequest) return;
     drawingCache.delete(path);
     drawingCache.set(path, { drawing: loaded, etag: res.headers.get("etag") ?? hit?.etag ?? "", version });
     while (drawingCache.size > 3) drawingCache.delete(drawingCache.keys().next().value!);
+    await view.prepareDrawing(loaded, controller.signal);
+    if (request !== openRequest) return;
     drawing = loaded;
     $<HTMLButtonElement>("#properties-button").disabled = false;
     fileVersion = version;
     homeBox = null;
     byHandle = new Map(drawing.entities.map((e, i) => [e.h, i]));
-    view.setDrawing(drawing, true);
+    view.setDrawing(drawing, true, true);
     $("#background-tools").hidden = true;
-    void loadImages(request, drawing, path);
+    const imagesReady = loadImages(request, drawing, path);
     restoreViewSettings();
     renderLayers();
     renderMeta();
-    // Include the first rendered frame in the open timing; preparing paths alone
-    // can finish well before a heavy drawing actually reaches the canvas.
-    view.draw();
+    const preparedMs = performance.now() - t0;
+    phase = `Drawing ${fileName(path)}`;
+    showProgress();
+    const revision = view.viewRevision;
+    // Checks may choose a better sheet frame; images may invalidate the canvas.
+    // Keep opening feedback until those changes and the final view are drawn.
+    await Promise.all([runLint(revision), imagesReady]);
+    if (request !== openRequest) return;
+    applyHash();
+    await view.renderComplete(controller.signal);
+    if (request !== openRequest) return;
     clearInterval(progressTimer);
     overlay(null);
+    displayedRequest = request;
     $("#perf").title = `Entities in the drawing and labels drawn at this zoom\nOpened in ${(performance.now() - t0).toFixed(0)} ms (server ${serverMs} ms, ${cached ? "cached" : "converted"})`;
     const shownMs = performance.now() - t0;
     const loadStatus = $("#load-time");
     loadStatus.textContent = `Opened in ${(shownMs / 1000).toFixed(1)}s`;
-    const details = `Ready to display: ${shownMs.toFixed(0)} ms · ${res.status === 304 ? "reused in browser" : cached ? "cached on server" : "first conversion"}\nServer open: ${serverMs} ms; response headers: ${headersMs.toFixed(0)} ms; payload ready: ${payloadMs.toFixed(0)} ms\n${res.headers.get("server-timing") ?? ""}`;
+    const details = `Ready to display: ${shownMs.toFixed(0)} ms · ${res.status === 304 ? "reused in browser" : cached ? "cached on server" : "first conversion"}\nServer open: ${serverMs} ms; response headers: ${headersMs.toFixed(0)} ms; payload ready: ${payloadMs.toFixed(0)} ms; geometry ready: ${preparedMs.toFixed(0)} ms\n${res.headers.get("server-timing") ?? ""}`;
     loadStatus.title = details;
     document.title = `${fileName(path)} — omakase-cadkit`;
-    const revision = view.viewRevision;
-    await runLint(revision);
-    if (request !== openRequest) return;
     loadStatus.title = `${details}\nChecks complete: ${(performance.now() - t0).toFixed(0)} ms total`;
-    applyHash();
     loadRecent();
     void browse(parentDir(drawing.source.path));
   } catch (err: any) {
@@ -1260,7 +1272,7 @@ window.addEventListener("keydown", (e) => {
     focusFinding(visibleFindings.indexOf(f));
     return true;
   },
-  state: () => ({ file, ready: Boolean(lint?.findings), entities: drawing?.entities.length ?? 0, findings: lint?.findings.length ?? 0, drawMs: view.lastDrawMs, labels: view.lastTextCount }),
+  state: () => ({ file, ready: Boolean(lint?.findings) && displayedRequest === openRequest, entities: drawing?.entities.length ?? 0, findings: lint?.findings.length ?? 0, drawMs: view.lastDrawMs, labels: view.lastTextCount }),
 };
 
 // Updates: the server checks GitHub at most hourly. An installed Windows copy installs the

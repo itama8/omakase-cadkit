@@ -1,6 +1,8 @@
 // Clipping calculation adapted from ACadSharp 3.8.0 Hatch.ExplodePattern (MIT).
 // Copyright (c) 2021 Albert Domenech; see licenses/ACadSharp-MIT.txt.
 // Continuous hatches need segment coordinates, not a full CAD Line object per segment.
+// Dashed hatches retain ACadSharp clipping and the existing dash phases, but share
+// the same bounded preparation queue instead of blocking serial emission.
 // Retain ACadSharp's intersections, parameter merging and midpoint parity calculation,
 // including its tolerances, so this avoids allocation without changing clipping semantics.
 using ACadSharp.Entities;
@@ -27,7 +29,7 @@ sealed partial class Payload
 				if (entity is Insert insert && insert.Block != null && blocks.Add(insert.Block)) Visit(insert.Block.Entities, depth + 1);
 				if (entity is not Hatch hatch || hatch.IsSolid || hatch.GradientColor?.Enabled == true || _hatchPosition.ContainsKey(hatch)) continue;
 				var lines = hatch.Pattern?.Lines;
-				if (lines == null || lines.Count == 0 || lines.Any(l => l.DashLengths?.Count > 0)) continue;
+				if (lines == null || lines.Count == 0) continue;
 				_hatchPosition.Add(hatch, _hatchOrder.Count);
 				_hatchOrder.Add(hatch);
 			}
@@ -37,8 +39,10 @@ sealed partial class Payload
 
 	List<(double, double, double, double)> PreparedPattern(Hatch hatch)
 	{
-		if (!_hatchPosition.TryGetValue(hatch, out int position)) return ContinuousPattern(hatch, _patternBudget);
-		int window = Math.Min(4, Environment.ProcessorCount);
+		if (!_hatchPosition.TryGetValue(hatch, out int position)) return ComputePattern(hatch, _patternBudget);
+		// Cheap hatches between expensive ones must not leave workers idle. Queue
+		// at most sixteen results; the semaphore still limits active work to four.
+		int window = 4 * Math.Min(4, Environment.ProcessorCount);
 		// An earlier look-ahead entry may have been rejected by the serial density
 		// or remaining-budget guard. Do not retain its result for the rest of the file.
 		foreach (var skipped in _preparingHatches.Keys.Where(h => _hatchPosition[h] < position).ToArray()) _preparingHatches.Remove(skipped);
@@ -57,7 +61,7 @@ sealed partial class Payload
 						double perp = Math.Abs(-Math.Sin(line.Angle) * line.Offset.X + Math.Cos(line.Angle) * line.Offset.Y);
 						estimate += perp > 0 ? diag / perp : double.PositiveInfinity;
 					}
-					return estimate <= PatternLimit ? ContinuousPattern(next, PatternLimit) : null;
+					return estimate <= PatternLimit ? ComputePattern(next, PatternLimit) : null;
 				}
 				catch { return null; }
 				finally { _hatchWorkers.Release(); }
@@ -65,6 +69,19 @@ sealed partial class Payload
 		}
 		var result = _preparingHatches[hatch].GetAwaiter().GetResult();
 		_preparingHatches.Remove(hatch);
+		return result;
+	}
+
+	static List<(double, double, double, double)> ComputePattern(Hatch hatch, int budget)
+	{
+		var lines = hatch.Pattern.Lines;
+		if (lines.All(l => l.DashLengths == null || l.DashLengths.Count == 0)) return ContinuousPattern(hatch, budget);
+		var result = new List<(double, double, double, double)>();
+		foreach (var seg in hatch.ExplodePattern()) {
+			if (seg is not Line l) continue;
+			Dash(result, l.StartPoint.X, l.StartPoint.Y, l.EndPoint.X, l.EndPoint.Y, lines);
+			if (result.Count > PatternLimit || result.Count > budget) return null;
+		}
 		return result;
 	}
 

@@ -190,6 +190,7 @@ export class DrawingCanvas {
   private zoomInputAt = 0;
   private settleTimer = 0;
   private pending = false;
+  private openingRender = false;
   private drawingVersion = 0;
   images: RasterOverlay[] = [];
   /** Raster images (aerial photos, scans) drawn behind the linework, independent of layers. */
@@ -225,9 +226,65 @@ export class DrawingCanvas {
 
   // ------------------------------------------------------------------ loading
 
+  /** Finish the visible frame without making opening one unbounded canvas task.
+   * Timers also work when a background tab suspends animation frames. */
+  async renderComplete(signal: AbortSignal) {
+    const version = this.drawingVersion;
+    try {
+      do {
+        signal.throwIfAborted();
+        this.draw(true);
+        await new Promise<void>(resolve => window.setTimeout(resolve, 16));
+      } while (this.pending || this.zoomMotion);
+      signal.throwIfAborted();
+    } finally {
+      if (this.drawingVersion === version) this.openingRender = false;
+    }
+  }
+
+  /** Prepare paths and hit indexes in small tasks, installing them only when
+   * complete. The displayed drawing remains intact if a newer open cancels this. */
+  async prepareDrawing(d: Drawing, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    const theme = JSON.stringify(this.theme);
+    if (this.preparedDrawings.get(d)?.theme === theme) return;
+    const builder = Object.create(DrawingCanvas.prototype) as DrawingCanvas;
+    builder.drawing = d;
+    builder.currentTheme = this.theme;
+    const steps = builder.buildGeometry();
+    let deadline = performance.now() + 8;
+    for (const _ of steps) {
+      signal.throwIfAborted();
+      if (performance.now() < deadline) continue;
+      await new Promise<void>(resolve => window.setTimeout(resolve, 0));
+      deadline = performance.now() + 8;
+    }
+    signal.throwIfAborted();
+    if (JSON.stringify(this.theme) !== theme) return this.prepareDrawing(d, signal);
+    this.preparedDrawings.set(d, { theme, tiles: builder.tiles, primBox: builder.primBox, entPrims: builder.entPrims, hitGrid: builder.hitGrid, hitCell: builder.hitCell, extents: builder.extents });
+    while (this.preparedDrawings.size > 2) this.preparedDrawings.delete(this.preparedDrawings.keys().next().value!);
+  }
+
+  private *buildGeometry(): Generator<void> {
+    const d = this.drawing!;
+    const box = new Float64Array(d.prims.length * 4);
+    this.entPrims = d.entities.map(() => []);
+    for (let i = 0; i < d.prims.length; i++) {
+      box.set(primBbox(d.prims[i]), i * 4);
+      this.entPrims[d.prims[i][1]]?.push(i);
+      if (i % 512 === 0) yield;
+    }
+    this.primBox = box;
+    this.extents = this.extentsRel();
+    yield;
+    yield* this.buildTileSteps();
+    yield* this.buildHitSteps();
+  }
+
   /** Reuse is opt-in for payload objects revalidated by the host. The default
    * rebuilds, including callers that edit a payload in place before setting it. */
-  setDrawing(d: Drawing, reuse = false) {
+  setDrawing(d: Drawing, reuse = false, progressiveOpen = false) {
+    this.openingRender = progressiveOpen;
     this.dropLayer(this.front);
     this.dropLayer(this.back);
     this.front = this.back = null;
@@ -248,18 +305,7 @@ export class DrawingCanvas {
       this.hitCell = prepared.hitCell;
       this.extents = prepared.extents;
     } else {
-      const n = d.prims.length;
-      const box = new Float64Array(n * 4);
-      this.entPrims = d.entities.map(() => []);
-      for (let i = 0; i < n; i++) {
-        const b = primBbox(d.prims[i]);
-        box.set(b, i * 4);
-        this.entPrims[d.prims[i][1]]?.push(i);
-      }
-      this.primBox = box;
-      this.extents = this.extentsRel();
-      this.buildTiles();
-      this.buildHitGrid();
+      for (const _ of this.buildGeometry()) { /* synchronous callers retain their contract */ }
     }
     this.preparedDrawings.delete(d);
     this.preparedDrawings.set(d, { theme, tiles: this.tiles, primBox: this.primBox, entPrims: this.entPrims, hitGrid: this.hitGrid, hitCell: this.hitCell, extents: this.extents });
@@ -310,7 +356,9 @@ export class DrawingCanvas {
     return [q(xs, 0.005), q(ys, 0.005), q(xs, 0.995), q(ys, 0.995)];
   }
 
-  private buildTiles() {
+  private buildTiles() { for (const _ of this.buildTileSteps()) { /* synchronous theme/worker compilation */ } }
+
+  private *buildTileSteps(): Generator<void> {
     const d = this.drawing!;
     const ext = this.extents;
     const N = 32;
@@ -324,18 +372,20 @@ export class DrawingCanvas {
     };
     const tiles: Tile[] = Array.from({ length: N * N + 1 }, () => ({ bbox: [Infinity, Infinity, -Infinity, -Infinity] as Bbox, batches: [], texts: [] }));
     const batchMaps: Map<string, Batch>[] = tiles.map(() => new Map());
-    d.prims.forEach((p, i) => {
-      if (this.isDefinitionPoint(p)) return;
+    for (let i = 0; i < d.prims.length; i++) {
+      if (i % 512 === 0) yield;
+      const p = d.prims[i];
+      if (this.isDefinitionPoint(p)) continue;
       const b = this.primBox.subarray(i * 4, i * 4 + 4);
       const t = tileIdx(b);
       const tile = tiles[t];
       tile.bbox = [Math.min(tile.bbox[0], b[0]), Math.min(tile.bbox[1], b[1]), Math.max(tile.bbox[2], b[2]), Math.max(tile.bbox[3], b[3])];
       if (p[0] === "t") {
         tile.texts.push(i);
-        return;
+        continue;
       }
       // A fill only used for picking draws nothing: its pattern or picture is drawn by other primitives.
-      if (p[0] === "f" && p[4] === 3) return;
+      if (p[0] === "f" && p[4] === 3) continue;
       const kind: Batch["kind"] = p[0] === "f" ? (p[4] === 1 ? "fillSolid" : p[4] === 2 ? "fillUnion" : "fillPattern") : p[0] === "d" ? "dot" : "stroke";
       const dash = p[0] === "p" ? p[6] : p[0] === "c" ? p[7] : p[0] === "a" ? p[9] : undefined;
       const color = cssColor(p[3], this.theme);
@@ -357,6 +407,7 @@ export class DrawingCanvas {
         const parts = batch.parts ??= new Map();
         const f = p[4];
         for (let j = 0; j + 3 < f.length; j += 4) {
+          if (j % 8192 === 0) yield;
           const bbox: Bbox = [Math.min(f[j], f[j + 2]), Math.min(f[j + 1], f[j + 3]), Math.max(f[j], f[j + 2]), Math.max(f[j + 1], f[j + 3])];
           const id = tileIdx(bbox);
           let part = parts.get(id);
@@ -371,7 +422,7 @@ export class DrawingCanvas {
         }
       } else if (p[0] === "d") batch.dots.push(p[4], p[5]);
       else addPrimToPath(batch.path, p);
-    });
+    }
     this.tiles = tiles.filter((t) => t.batches.length || t.texts.length);
   }
 
@@ -419,12 +470,13 @@ export class DrawingCanvas {
     }
   }
 
-  private buildHitGrid() {
+  private *buildHitSteps(): Generator<void> {
     const ext = this.extents;
     this.hitCell = Math.max(ext[2] - ext[0], ext[3] - ext[1], 1e-6) / 256;
     const g = new Map<string, number[]>();
     const n = this.drawing!.prims.length;
     for (let i = 0; i < n; i++) {
+      if (i % 512 === 0) yield;
       if (this.isDefinitionPoint(this.drawing!.prims[i])) continue;
       const b = this.primBox.subarray(i * 4, i * 4 + 4);
       const x0 = Math.floor(b[0] / this.hitCell), x1 = Math.floor(b[2] / this.hitCell), y0 = Math.floor(b[1] / this.hitCell), y1 = Math.floor(b[3] / this.hitCell);
@@ -644,7 +696,7 @@ export class DrawingCanvas {
       this.front.scale = targetScale;
       this.front.staging = !!this.back;
     }
-    const budget = zooming && (this.front.tiles.size || this.back?.tiles.size) ? 0 : progressive && this.back ? RENDER_BUDGET_MS : Infinity;
+    const budget = zooming && (this.front.tiles.size || this.back?.tiles.size) ? 0 : progressive && (this.back || this.openingRender) ? RENDER_BUDGET_MS : Infinity;
     if (!zooming && this.front.scale === s) {
       const left = this.cx * s - this.width / 2, top = -this.cy * s - this.height / 2;
       // The cursor-anchor calculation and easing can differ by a rounding bit.
@@ -716,20 +768,31 @@ export class DrawingCanvas {
     return `${this.drawingVersion}|${this.dpr}|${[...this.hiddenLayers].sort().join(",")}|${JSON.stringify(this.theme)}`;
   }
 
-  /** Render the overview when the browser is idle, never during a gesture. */
+  /** Retain a small stand-in from completed pixels. Replaying the whole drawing
+   * in an idle callback still blocks input when the browser rasterizes its paths. */
   private scheduleOverview() {
     if (this.overviewIdle) return;
     const run = () => {
       this.overviewIdle = 0;
-      if (!this.drawing || this.zoomMotion || performance.now() - this.zoomInputAt < ZOOM_SETTLE_MS) return;
+      if (!this.drawing || this.zoomMotion || this.pending || this.selected.size || !this.front || this.front.staging || performance.now() - this.zoomInputAt < ZOOM_SETTLE_MS) return;
       const key = this.overviewKey();
       if (this.overview?.key === key) return;
       if (this.overview) this.overview.canvas.width = 1;
-      const [x0, y0, x1, y1] = this.extents;
-      const scale = OVERVIEW_PX / this.dpr / Math.max(x1 - x0, y1 - y0, 1e-9);
-      const left = x0 * scale, top = -y1 * scale;
-      const { canvas } = this.renderRaster(scale, left, top, (x1 - x0) * scale, (y1 - y0) * scale, false);
-      this.overview = { key, scale, left, top, canvas };
+      const layer = this.front;
+      const factor = Math.min(1, OVERVIEW_PX / Math.max(this.canvas.width, this.canvas.height));
+      const left = this.cx * layer.scale - this.width / 2, top = -this.cy * layer.scale - this.height / 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.ceil((this.width * factor + 2 * RASTER_BLEED) * this.dpr);
+      canvas.height = Math.ceil((this.height * factor + 2 * RASTER_BLEED) * this.dpr);
+      const ctx = canvas.getContext("2d")!;
+      ctx.fillStyle = this.theme.bg;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.setTransform(this.dpr * factor, 0, 0, this.dpr * factor, this.dpr * RASTER_BLEED, this.dpr * RASTER_BLEED);
+      for (const [id, tile] of layer.tiles) {
+        const [x, y] = id.split(",").map(Number);
+        ctx.drawImage(tile.canvas, layer.originX + x * this.rasterSize - left - RASTER_BLEED, layer.originY + y * this.rasterSize - top - RASTER_BLEED, tile.canvas.width / this.dpr, tile.canvas.height / this.dpr);
+      }
+      this.overview = { key, scale: layer.scale * factor, left: left * factor, top: top * factor, canvas };
     };
     this.overviewIdle = typeof requestIdleCallback === "function" ? requestIdleCallback(run, { timeout: 1000 }) : window.setTimeout(run, 200);
   }

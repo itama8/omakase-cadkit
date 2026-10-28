@@ -1227,21 +1227,8 @@ sealed partial class Payload
 				}
 				if (estimate <= PatternLimit && estimate <= _patternBudget)
 				{
-					if (lines.All(l => l.DashLengths == null || l.DashLengths.Count == 0))
-					{
-						result = PreparedPattern(ht);
-						if (result?.Count > _patternBudget) result = null;
-					}
-					else
-					{
-						result = new();
-						foreach (var seg in ht.ExplodePattern())
-						{
-							if (seg is not Line l) continue;
-							Dash(result, l.StartPoint.X, l.StartPoint.Y, l.EndPoint.X, l.EndPoint.Y, lines);
-							if (result.Count > PatternLimit || result.Count > _patternBudget) { result = null; break; }
-						}
-					}
+					result = PreparedPattern(ht);
+					if (result?.Count > _patternBudget) result = null;
 					if (result != null) _patternBudget -= result.Count;
 				}
 			}

@@ -3,6 +3,19 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
 
+// A never-shown Form has no topmost desktop window to own the picker. Show a
+// transparent owner first so the native dialog appears above the browser, without
+// adding a visible window or taskbar button. Keep it alive until the dialog closes.
+const windowsPickerOwner = `
+$owner = New-Object System.Windows.Forms.Form
+$owner.ShowInTaskbar = $false
+$owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+$owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+$owner.Size = New-Object System.Drawing.Size(1, 1)
+$owner.Opacity = 0
+$owner.TopMost = $true
+`;
+
 function dialog(cmd: string, args: string[], folder: string, cancelExit = false): Promise<string | null> {
   return new Promise((resolve, reject) => {
     execFile(cmd, args, {
@@ -25,9 +38,10 @@ $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $dialog.Description = 'Choose a drawing folder'
 $dialog.SelectedPath = $env:OMAKASE_PICKER_FOLDER
 $dialog.ShowNewFolderButton = $false
-$owner = New-Object System.Windows.Forms.Form
-$owner.TopMost = $true
+${windowsPickerOwner}
 try {
+  $owner.Show()
+  $owner.Activate()
   if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Write($dialog.SelectedPath) }
 } finally { $dialog.Dispose(); $owner.Dispose() }
 `;
@@ -67,9 +81,10 @@ $dialog.Title = 'Open a drawing'
 $dialog.Filter = 'Drawings (*.dwg;*.dxf)|*.dwg;*.dxf|All files (*.*)|*.*'
 $dialog.InitialDirectory = $env:OMAKASE_PICKER_FOLDER
 $dialog.CheckFileExists = $true
-$owner = New-Object System.Windows.Forms.Form
-$owner.TopMost = $true
+${windowsPickerOwner}
 try {
+  $owner.Show()
+  $owner.Activate()
   if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Write($dialog.FileName) }
 } finally { $dialog.Dispose(); $owner.Dispose() }
 `;
