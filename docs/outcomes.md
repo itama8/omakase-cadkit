@@ -1,7 +1,7 @@
 # Outcomes
 
 What the project is working toward, and the next step for each. Details and evidence
-are in the linked devlogs. Updated 2026-10-28.
+are in the linked devlogs. Updated 2026-11-02.
 
 **States:** `queued` → `active` → `verifying` → `done`; also `partial` and `later`.
 `done` means the evidence was seen, and only on the platforms named.
@@ -10,7 +10,7 @@ are in the linked devlogs. Updated 2026-10-28.
 
 | ID | Outcome | State | Next step |
 |---|---|---|---|
-| O11 | A tester installs one download and uses the app with nothing else installed. | verifying | Windows user confirms alpha.4 and drawing open, but reports picker behind browser and 18.2 s for 4.7 MB. Retest picker and opening corrections in a new Windows build; D4 → D5 → D4 source checks pass, first-conversion hatch cost remains ([s03](../.devlog/2026-10-28-s03.md)). |
+| O11 | A tester installs one download and uses the app with nothing else installed. | verifying | Prepare alpha.5 with picker and opening corrections, then retest on Windows: picker foreground/cancel and drawing A → B → A timings. Linux checks pass; native behavior and first-conversion hatch latency remain open ([s01](../.devlog/2026-11-02-s01.md)). |
 | O10 | A drafter reading a finding knows what is wrong, how to fix it in AutoCAD, and can tune the checks. | partial | Turn rules on/off, change severity and accept findings from the GUI ([s04](../.devlog/2026-10-26-s04.md)). |
 | O6 | Pan, zoom and selection feel instant on heavy drawings. | active | Desktop repaint accepted, including a 14.1 MB drawing ([s01](../.devlog/2026-10-28-s01.md)); reduce remaining fresh high-scale redraw and large reopen/image-arrival latency. |
 | O5 | Reviewers can trust what is drawn and found on a wider set of drawings. | partial | Review the newly drawn details in the viewer; plot styles, exact fonts and layouts remain ([s10](../.devlog/2026-10-26-s10.md)). |
